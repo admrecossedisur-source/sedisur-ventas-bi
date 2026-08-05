@@ -311,7 +311,7 @@ with st.expander("🔍 **Panel de Filtros Comerciales**", expanded=True):
         
         meses_en_datos = [m for m in ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
                                       'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'] if m in df_raw['MES_NOMBRE'].unique()]
-        sel_meses = st.multiselect("Mes", meses_en_data, key="filtro_meses" if 'meses_en_data' in locals() else "filtro_meses") # Corregido por seguridad
+        sel_meses = st.multiselect("Mes", meses_en_data, key="filtro_meses" if 'meses_en_datos' in locals() else "filtro_meses") # Corregido por seguridad
 
     with col2:
         marcas = sorted(df_raw['CLASIFICACION_1'].dropna().unique())
