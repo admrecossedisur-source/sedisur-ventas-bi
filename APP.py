@@ -17,7 +17,6 @@ st.set_page_config(
 # ---------------------------------------------------------
 @st.cache_data
 def cargar_datos_exactus():
-    # Lee el archivo de datos procesados (sin tocar SQL Server)
     df = pd.read_parquet("datos_ventas.parquet")
     
     df = df[df['CLASIFICACION_1'].notna() & (df['CLASIFICACION_1'].astype(str).str.strip() != '') & (df['CLASIFICACION_1'] != 'SIN CLASIFICAR')]
@@ -309,7 +308,7 @@ with st.expander("🔍 **Panel de Filtros Comerciales**", expanded=True):
         sel_anios = st.multiselect("Año", anios_disponibles, key="filtro_anios")
         
         meses_disponibles = [m for m in ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
-                                      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'] if m in df_raw['MES_NOMBRE'].unique()]
+                                        'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'] if m in df_raw['MES_NOMBRE'].unique()]
         sel_meses = st.multiselect("Mes", meses_disponibles, key="filtro_meses")
 
     with col2:
