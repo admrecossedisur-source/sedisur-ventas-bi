@@ -364,6 +364,7 @@ if not df_filt.empty:
     
     with st.expander(f"📦 Ver Artículos para: [{sel_c1}] ➔ [{sel_c2}]", expanded=True):
         if not df_det_c2.empty:
+            st.write(df_det_c2.columns)
             df_articulos = df_det_c2.groupby(['ARTICULO', 'DESCRIPCION'], as_index=False).agg({
                 'CANTIDAD_NETA': 'sum',
                 'VENTA_NETA': 'sum'
