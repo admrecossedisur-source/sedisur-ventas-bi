@@ -293,7 +293,6 @@ if "filtro_clientes" not in st.session_state:
 # --- FILTROS EN PANEL EXPANDIBLE SUPERIOR ---
 with st.expander("🔍 **Panel de Filtros Comerciales**", expanded=True):
     
-    # --- BOTÓN DE SINCRONIZACIÓN (Actualiza el archivo local) ---
     col_btn1, col_btn2 = st.columns([1, 3])
     with col_btn1:
         if st.button("🔄 Recargar Datos", help="Limpia la caché y vuelve a leer el archivo de datos"):
@@ -309,9 +308,9 @@ with st.expander("🔍 **Panel de Filtros Comerciales**", expanded=True):
         anios_disponibles = sorted(df_raw['ANIO'].unique(), reverse=True)
         sel_anios = st.multiselect("Año", anios_disponibles, key="filtro_anios")
         
-        meses_en_datos = [m for m in ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
+        meses_disponibles = [m for m in ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
                                       'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'] if m in df_raw['MES_NOMBRE'].unique()]
-        sel_meses = st.multiselect("Mes", meses_en_datos, key="filtro_meses" if 'meses_en_datos' in locals() else "filtro_meses") # Corregido por seguridad
+        sel_meses = st.multiselect("Mes", meses_disponibles, key="filtro_meses")
 
     with col2:
         marcas = sorted(df_raw['CLASIFICACION_1'].dropna().unique())
@@ -340,3 +339,49 @@ if sel_clientes:
 
 # Invocación de la Vista Comparativa Completa
 mostrar_vista_comparativa(df_filt)
+
+# ---------------------------------------------------------
+# DESGLOSE GERENCIAL: ARTÍCULOS POR CLASIFICACIÓN
+# ---------------------------------------------------------
+st.divider()
+st.header("🔍 Detalle de Artículos Vendidos")
+st.markdown("Utiliza los selectores en abanico para desglosar una clasificación y consultar los productos exactos vendidos.")
+
+if not df_filt.empty:
+    col_sel1, col_sel2 = st.columns(2)
+    
+    with col_sel1:
+        c1_opciones = sorted(df_filt['CLASIFICACION_1'].dropna().unique())
+        sel_c1 = st.selectbox("Seleccione Clasificación 1 (Marca):", c1_opciones, key="det_clas1")
+    
+    df_det_c1 = df_filt[df_filt['CLASIFICACION_1'] == sel_c1]
+    
+    with col_sel2:
+        c2_opciones = sorted(df_det_c1['CLASIFICACION_2'].dropna().unique())
+        sel_c2 = st.selectbox("Seleccione Clasificación 2:", c2_opciones, key="det_clas2")
+        
+    df_det_c2 = df_det_c1[df_det_c1['CLASIFICACION_2'] == sel_c2]
+    
+    with st.expander(f"📦 Ver Artículos para: [{sel_c1}] ➔ [{sel_c2}]", expanded=True):
+        if not df_det_c2.empty:
+            df_articulos = df_det_c2.groupby(['ARTICULO', 'DESCRIPCION'], as_index=False).agg({
+                'CANTIDAD_NETA': 'sum',
+                'VENTA_NETA': 'sum'
+            }).sort_values(by='VENTA_NETA', ascending=False)
+            
+            df_articulos['VENTA_NETA_FORMAT'] = df_articulos['VENTA_NETA'].apply(lambda x: f"₡{x:,.2f}")
+            df_articulos['CANTIDAD_NETA'] = df_articulos['CANTIDAD_NETA'].apply(lambda x: f"{x:,.2f}")
+            
+            df_mostrar = df_articulos[['ARTICULO', 'DESCRIPCION', 'CANTIDAD_NETA', 'VENTA_NETA_FORMAT', 'VENTA_NETA']].copy()
+            df_mostrar.columns = ['Código Artículo', 'Descripción del Producto', 'Cantidad Neta', 'Venta Neta (₡)', '_orden']
+            df_mostrar = df_mostrar.sort_values(by='_orden', ascending=False).drop(columns=['_orden'])
+            
+            st.dataframe(
+                df_mostrar,
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.info("No se encontraron artículos registrados para esta combinación en los filtros actuales.")
+else:
+    st.warning("No hay datos disponibles con los filtros actuales para mostrar el desglose de artículos.")
