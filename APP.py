@@ -364,7 +364,12 @@ if not df_filt.empty:
     
     with st.expander(f"📦 Ver Artículos para: [{sel_c1}] ➔ [{sel_c2}]", expanded=True):
         if not df_det_c2.empty:
-            df_articulos = df_det_c2.groupby(['ARTICULO', 'DESCRIPCION'], as_index=False).agg({
+            # Validar si existe la columna DESCRIPCION, si no, agrupar solo por ARTICULO
+            cols_agrupar = ['ARTICULO']
+            if 'DESCRIPCION' in df_det_c2.columns:
+                cols_agrupar.append('DESCRIPCION')
+            
+            df_articulos = df_det_c2.groupby(cols_agrupar, as_index=False).agg({
                 'CANTIDAD_NETA': 'sum',
                 'VENTA_NETA': 'sum'
             }).sort_values(by='VENTA_NETA', ascending=False)
@@ -372,8 +377,13 @@ if not df_filt.empty:
             df_articulos['VENTA_NETA_FORMAT'] = df_articulos['VENTA_NETA'].apply(lambda x: f"₡{x:,.2f}")
             df_articulos['CANTIDAD_NETA'] = df_articulos['CANTIDAD_NETA'].apply(lambda x: f"{x:,.2f}")
             
-            df_mostrar = df_articulos[['ARTICULO', 'DESCRIPCION', 'CANTIDAD_NETA', 'VENTA_NETA_FORMAT', 'VENTA_NETA']].copy()
-            df_mostrar.columns = ['Código Artículo', 'Descripción del Producto', 'Cantidad Neta', 'Venta Neta (₡)', '_orden']
+            if 'DESCRIPCION' in df_articulos.columns:
+                df_mostrar = df_articulos[['ARTICULO', 'DESCRIPCION', 'CANTIDAD_NETA', 'VENTA_NETA_FORMAT', 'VENTA_NETA']].copy()
+                df_mostrar.columns = ['Código Artículo', 'Descripción del Producto', 'Cantidad Neta', 'Venta Neta (₡)', '_orden']
+            else:
+                df_mostrar = df_articulos[['ARTICULO', 'CANTIDAD_NETA', 'VENTA_NETA_FORMAT', 'VENTA_NETA']].copy()
+                df_mostrar.columns = ['Código Artículo', 'Cantidad Neta', 'Venta Neta (₡)', '_orden']
+                
             df_mostrar = df_mostrar.sort_values(by='_orden', ascending=False).drop(columns=['_orden'])
             
             st.dataframe(
