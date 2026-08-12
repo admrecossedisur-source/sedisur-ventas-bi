@@ -6,8 +6,8 @@ import io
 
 # Intentar importar ReportLab para la generación del PDF con soporte de gráficos
 try:
-    from reportlab.lib.pagesizes import letter, landscape
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
+    from reportlab.lib.pagesizes import A4
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage, KeepTogether
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib import colors
     REPORTLAB_DISPONIBLE = True
@@ -129,7 +129,7 @@ def generar_tabla_comparativa_formateada(df_sub: pd.DataFrame, col_group: str, t
     )
 
 # ---------------------------------------------------------
-# 4. Generador de PDF Completo (Tablas + Gráfico en Imagen)
+# 4. Generador de PDF Completo (A4, Márgenes Estrechos, Azul Claro)
 # ---------------------------------------------------------
 def construir_datos_tabla_pdf(df_sub, col_group, titulo_col):
     pivot = pd.pivot_table(
@@ -173,10 +173,11 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
         return None
     
     buffer = io.BytesIO()
+    # A4 en horizontal (landscape) con márgenes estrechos (20 puntos ~ 0.7 cm)
     doc = SimpleDocTemplate(
         buffer, 
-        pagesize=landscape(letter),
-        rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30
+        pagesize=A4,
+        rightMargin=20, leftMargin=20, topMargin=20, bottomMargin=20
     )
     
     story = []
@@ -185,24 +186,36 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
     style_title = ParagraphStyle(
         'TitleStyle',
         parent=styles['Heading1'],
-        fontSize=14,
-        textColor=colors.HexColor("#1f4e78"),
-        spaceAfter=10
+        fontSize=13,
+        textColor=colors.HexColor("#2f5597"),
+        spaceAfter=4
     )
     style_subtitle = ParagraphStyle(
         'SubTitleStyle',
         parent=styles['Heading2'],
-        fontSize=11,
+        fontSize=10,
         textColor=colors.HexColor("#333333"),
-        spaceAfter=6,
-        spaceBefore=10
+        spaceAfter=4,
+        spaceBefore=6
     )
 
+    # Encabezado principal del reporte
     story.append(Paragraph(f"<b>Informe Ejecutivo Sedisur BI - {seleccion_actual}</b>", style_title))
     story.append(Paragraph(f"Generado el: {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles['Normal']))
-    story.append(Spacer(1, 10))
+    
+    # Contexto de cliente o vendedor en la primera hoja si aplica
+    clientes_unicos = df_analisis['CLIENTE'].unique()
+    if len(clientes_unicos) == 1:
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(f"<b>Cliente:</b> {df_analisis['ALIAS'].iloc[0]} | <b>Razón Social:</b> {df_analisis['NOMBRE'].iloc[0]} | <b>Código:</b> {df_analisis['CLIENTE'].iloc[0]}", styles['Normal']))
 
-    # 1. Tabla Principal Mensual
+    vendedores_unicos = df_analisis['VENDEDOR'].unique()
+    if len(vendedores_unicos) == 1 and pd.notna(vendedores_unicos[0]):
+        story.append(Paragraph(f"<b>Vendedor:</b> {vendedores_unicos[0]}", styles['Normal']))
+
+    story.append(Spacer(1, 8))
+
+    # 1. Tabla Principal Mensual (Total Sedisur o Proveedor analizado)
     story.append(Paragraph("<b>Tabla Comparativa por Mes y Variación Porcentual</b>", style_subtitle))
     pivot_base = pd.pivot_table(
         df_analisis,
@@ -217,7 +230,7 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
     pivot_base.rename(columns={'MES_NOMBRE': 'Mes'}, inplace=True)
     anios_presentes = sorted([col for col in pivot_base.columns if col != 'Mes'])
 
-    if len(anios_presentes) >= 2:
+    if len(anios_presentes] >= 2:
         fila_totales = {'Mes': 'TOTAL GENERAL'}
         for anio in anios_presentes:
             fila_totales[anio] = pivot_base[anio].sum()
@@ -232,51 +245,50 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
                 fila_vals.append(f"₡{row[anio]:,.2f}")
             data_pdf.append(fila_vals)
             
-        t = Table(data_pdf, colWidths=[70] + [100]*len(anios_presentes))
+        t = Table(data_pdf, colWidths=[65] + [90]*len(anios_presentes))
         t.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1f4e78")),
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#4a90e2")), # Azul claro elegante
             ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0,0), (-1,0), 8),
+            ('FONTSIZE', (0,0), (-1,0), 7),
             ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#e2efda")),
             ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
             ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
             ('FONTSIZE', (0,1), (-1,-1), 7),
         ]))
         story.append(t)
-        story.append(Spacer(1, 10))
+        story.append(Spacer(1, 8))
 
-    # 2. Gráfico en Imagen
+    # 2. Gráfico en Imagen (Tendencia Evolutiva Mensual)
     try:
-        img_bytes = fig_plotly.to_image(format="png", width=700, height=300, scale=2)
+        img_bytes = fig_plotly.to_image(format="png", width=650, height=240, scale=2)
         img_io = io.BytesIO(img_bytes)
         story.append(Paragraph("<b>Tendencia Evolutiva Mensual</b>", style_subtitle))
-        story.append(RLImage(img_io, width=500, height=210))
-        story.append(Spacer(1, 10))
+        story.append(RLImage(img_io, width=420, height=155))
+        story.append(Spacer(1, 8))
     except Exception:
         pass
 
     # 3. Tablas Inferiores (Resumen y Proveedores)
     story.append(Paragraph("<b>Comparativa por Proveedores y Categorías</b>", style_subtitle))
     
-    # Resumen principal
     data_res, headers_res = construir_datos_tabla_pdf(df_analisis, 'CLASIFICACION_1', f'Resumen ({seleccion_actual})')
     if data_res:
-        t_res = Table(data_res, colWidths=[180, 110, 110, 100])
+        t_res = Table(data_res, colWidths=[160, 95, 95, 85])
         t_res.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2f5597")),
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#4a90e2")),
             ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0,0), (-1,0), 8),
+            ('FONTSIZE', (0,0), (-1,0), 7),
             ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#e2efda")),
             ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
             ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
             ('FONTSIZE', (0,1), (-1,-1), 7),
         ]))
         story.append(t_res)
-        story.append(Spacer(1, 10))
+        story.append(Spacer(1, 6))
 
     # Iterar proveedores secundarios
     orden_personalizado = [
@@ -298,20 +310,20 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
             if not df_prov.empty:
                 data_prov, _ = construir_datos_tabla_pdf(df_prov, 'CLASIFICACION_2', f"Proveedor: {prov}")
                 if data_prov:
-                    story.append(Spacer(1, 5))
-                    t_p = Table(data_prov, colWidths=[180, 110, 110, 100])
+                    t_p = Table(data_prov, colWidths=[160, 95, 95, 85])
                     t_p.setStyle(TableStyle([
-                        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#595959")),
+                        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#5b9bd5")), # Azul claro secundario
                         ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
                         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
                         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                        ('FONTSIZE', (0,0), (-1,0), 7),
+                        ('FONTSIZE', (0,0), (-1,0), 6.5),
                         ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#f2f2f2")),
                         ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
                         ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-                        ('FONTSIZE', (0,1), (-1,-1), 7),
+                        ('FONTSIZE', (0,1), (-1,-1), 6.5),
                     ]))
-                    story.append(t_p)
+                    # Usamos KeepTogether para evitar que una tabla de proveedor se rompa a la mitad entre páginas
+                    story.append(KeepTogether([Spacer(1, 4), t_p]))
 
     doc.build(story)
     buffer.seek(0)
@@ -355,7 +367,7 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     else:
         df_analisis = df
 
-    # Generar gráfico preliminar para incluirlo tanto en la vista como en el PDF
+    # Generar gráfico preliminar para la vista y el PDF
     df_agrupado = df_analisis.groupby(['ANIO', 'MES_NUM', 'MES_NOMBRE'], as_index=False).agg({
         'VENTA_NETA': 'sum',
         'CANTIDAD_NETA': 'sum'
@@ -388,7 +400,7 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
                     help="Descargar informe PDF completo con tablas y gráficos"
                 )
         else:
-            st.caption("Instale `reportlab` para PDF.")
+            st.caption("Instale `reportlab`.")
 
     # --- BARRA DE CONTROL CON TRES BOTONES (ANTERIOR, SEDISUR, SIGUIENTE) ---
     col_info, col_btn_izq, col_btn_sedisur, col_btn_der = st.columns([3.5, 1.1, 1.1, 1.1])
