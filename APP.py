@@ -164,6 +164,45 @@ def construir_datos_tabla_pdf(df_sub, col_group, titulo_col):
         
     return data, headers
 
+def construir_datos_tabla_mensual_pdf(df_filtrado):
+    pivot_base = pd.pivot_table(
+        df_filtrado,
+        index=['MES_NUM', 'MES_NOMBRE'],
+        columns='ANIO',
+        values='VENTA_NETA',
+        aggfunc='sum',
+        fill_value=0
+    ).reset_index()
+
+    for a in [2024, 2025, 2026]:
+        if a not in pivot_base.columns:
+            pivot_base[a] = 0.0
+
+    pivot_base = pivot_base.sort_values('MES_NUM').drop(columns=['MES_NUM'])
+    pivot_base.rename(columns={'MES_NOMBRE': 'Mes'}, inplace=True)
+
+    fila_totales = {'Mes': 'TOTAL GENERAL', 2024: pivot_base[2024].sum(), 2025: pivot_base[2025].sum(), 2026: pivot_base[2026].sum()}
+    pivot_completa = pd.concat([pivot_base, pd.DataFrame([fila_totales])], ignore_index=True)
+
+    headers_pdf = ['Mes', '2024', '2025', 'Var % (25/24)', '2026', 'Var % (26/25)']
+    data_pdf = [headers_pdf]
+    
+    for _, row in pivot_completa.iterrows():
+        v25_24 = calcular_variacion(row[2025], row[2024])
+        v26_25 = calcular_variacion(row[2026], row[2025])
+        
+        fila_vals = [
+            str(row['Mes']),
+            f"{row[2024]:,.2f}",
+            f"{row[2025]:,.2f}",
+            f"{v25_24:+.1f}%",
+            f"{row[2026]:,.2f}",
+            f"{v26_25:+.1f}%"
+        ]
+        data_pdf.append(fila_vals)
+        
+    return data_pdf
+
 def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
     if not REPORTLAB_DISPONIBLE:
         return None
@@ -208,46 +247,14 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
 
     story.append(Spacer(1, 8))
 
-    story.append(Paragraph("<b>Tabla Comparativa por Mes y Variaciones (2024 - 2025 - 2026)</b>", style_subtitle))
-    
-    pivot_base = pd.pivot_table(
-        df_analisis,
-        index=['MES_NUM', 'MES_NOMBRE'],
-        columns='ANIO',
-        values='VENTA_NETA',
-        aggfunc='sum',
-        fill_value=0
-    ).reset_index()
+    # Definir los proveedores específicos solicitados para las 6 tablas mensuales iniciales
+    proveedores_principales = ['COLGATE_PALM', 'ESSITY', 'HEINZ.CR', 'ALIMER S.A.', 'PEPSICO']
 
-    for a in [2024, 2025, 2026]:
-        if a not in pivot_base.columns:
-            pivot_base[a] = 0.0
-
-    pivot_base = pivot_base.sort_values('MES_NUM').drop(columns=['MES_NUM'])
-    pivot_base.rename(columns={'MES_NOMBRE': 'Mes'}, inplace=True)
-
-    fila_totales = {'Mes': 'TOTAL GENERAL', 2024: pivot_base[2024].sum(), 2025: pivot_base[2025].sum(), 2026: pivot_base[2026].sum()}
-    pivot_completa = pd.concat([pivot_base, pd.DataFrame([fila_totales])], ignore_index=True)
-
-    headers_pdf = ['Mes', '2024', '2025', 'Var % (25/24)', '2026', 'Var % (26/25)']
-    data_pdf = [headers_pdf]
-    
-    for _, row in pivot_completa.iterrows():
-        v25_24 = calcular_variacion(row[2025], row[2024])
-        v26_25 = calcular_variacion(row[2026], row[2025])
-        
-        fila_vals = [
-            str(row['Mes']),
-            f"{row[2024]:,.2f}",
-            f"{row[2025]:,.2f}",
-            f"{v25_24:+.1f}%",
-            f"{row[2026]:,.2f}",
-            f"{v26_25:+.1f}%"
-        ]
-        data_pdf.append(fila_vals)
-        
-    t = Table(data_pdf, colWidths=[65, 75, 75, 75, 75, 75])
-    t.setStyle(TableStyle([
+    # 1. Tabla General Consolidada
+    story.append(Paragraph("<b>Tabla Comparativa por Mes y Variaciones (2024 - 2025 - 2026) - Consolidado General</b>", style_subtitle))
+    data_gen = construir_datos_tabla_mensual_pdf(df_analisis)
+    t_gen = Table(data_gen, colWidths=[65, 75, 75, 75, 75, 75])
+    t_gen.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#4a90e2")),
         ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
@@ -258,8 +265,28 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
         ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
         ('FONTSIZE', (0,1), (-1,-1), 6.5),
     ]))
-    story.append(t)
+    story.append(t_gen)
     story.append(Spacer(1, 8))
+
+    # 2. Las 5 tablas adicionales para los proveedores específicos (Colgate, Essity, Heinz, Alimer, Pepsico)
+    for prov_esp in proveedores_principales:
+        df_prov_esp = df_analisis[df_analisis['CLASIFICACION_1'].str.strip() == prov_esp]
+        if not df_prov_esp.empty:
+            story.append(Paragraph(f"<b>Tabla Comparativa por Mes y Variaciones (2024 - 2025 - 2026) - Proveedor: {prov_esp}</b>", style_subtitle))
+            data_esp = construir_datos_tabla_mensual_pdf(df_prov_esp)
+            t_esp = Table(data_esp, colWidths=[65, 75, 75, 75, 75, 75])
+            t_esp.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#5b9bd5")),
+                ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0,0), (-1,0), 6.5),
+                ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#f2f2f2")),
+                ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+                ('FONTSIZE', (0,1), (-1,-1), 6.5),
+            ]))
+            story.append(KeepTogether([t_esp, Spacer(1, 8)]))
 
     try:
         img_bytes = fig_plotly.to_image(format="png", width=650, height=240, scale=2)
