@@ -51,6 +51,72 @@ def resaltar_variaciones(val):
             pass
     return ''
 
+def generar_tabla_comparativa_formateada(df_sub: pd.DataFrame, col_group: str, titulo: str):
+    if df_sub.empty:
+        return
+
+    pivot = pd.pivot_table(
+        df_sub,
+        index=col_group,
+        columns='ANIO',
+        values='VENTA_NETA',
+        aggfunc='sum',
+        fill_value=0
+    ).reset_index()
+
+    anios = sorted([col for col in pivot.columns if col != col_group])
+    if len(anios) < 2:
+        return
+
+    res_df = pd.DataFrame()
+    res_df[titulo] = pivot[col_group]
+
+    a1, a2 = anios[0], anios[1]
+    res_df[str(a1)] = pivot[a1].apply(lambda x: f"₡{x:,.2f}")
+    res_df[str(a2)] = pivot[a2].apply(lambda x: f"₡{x:,.2f}")
+    
+    vars_a = [calcular_variacion(act, ant) for act, ant in zip(pivot[a2], pivot[a1])]
+    res_df['IND'] = [f"{v:+.1f}%" if v != 0 else "0.0%" for v in vars_a]
+
+    if len(anios) >= 3:
+        a3 = anios[2]
+        meses_a3 = df_sub[df_sub['ANIO'] == a3]['MES_NUM'].unique()
+        
+        v_a2_periodo = df_sub[(df_sub['ANIO'] == a2) & (df_sub['MES_NUM'].isin(meses_a3))].groupby(col_group)['VENTA_NETA'].sum().reindex(pivot[col_group], fill_value=0).values
+        v_a3_periodo = df_sub[(df_sub['ANIO'] == a3) & (df_sub['MES_NUM'].isin(meses_a3))].groupby(col_group)['VENTA_NETA'].sum().reindex(pivot[col_group], fill_value=0).values
+        
+        res_df[f"{a2} ({a3})"] = [f"₡{x:,.2f}" for x in v_a2_periodo]
+        res_df[str(a3)] = [f"₡{x:,.2f}" for x in v_a3_periodo]
+        
+        vars_p = [calcular_variacion(act, ant) for act, ant in zip(v_a3_periodo, v_a2_periodo)]
+        res_df['IND '] = [f"{v:+.1f}%" if v != 0 else "0.0%" for v in vars_p]
+
+    totales = {titulo: 'TOTAL'}
+    totales[str(a1)] = f"₡{pivot[a1].sum():,.2f}"
+    totales[str(a2)] = f"₡{pivot[a2].sum():,.2f}"
+    totales['IND'] = f"{calcular_variacion(pivot[a2].sum(), pivot[a1].sum()):+.1f}%"
+
+    if len(anios) >= 3:
+        v2_tot = df_sub[(df_sub['ANIO'] == a2) & (df_sub['MES_NUM'].isin(meses_a3))]['VENTA_NETA'].sum()
+        v3_tot = df_sub[(df_sub['ANIO'] == a3) & (df_sub['MES_NUM'].isin(meses_a3))]['VENTA_NETA'].sum()
+        totales[f"{a2} ({a3})"] = f"₡{v2_tot:,.2f}"
+        totales[str(a3)] = f"₡{v3_tot:,.2f}"
+        totales['IND '] = f"{calcular_variacion(v3_tot, v2_tot):+.1f}%"
+
+    df_tot = pd.DataFrame([totales])
+    res_completo = pd.concat([res_df, df_tot], ignore_index=True)
+
+    cols_ind = [c for c in res_completo.columns if 'IND' in c]
+    styler = res_completo.style.map(resaltar_variaciones, subset=cols_ind)
+    
+    st.subheader(f"🏷️ {titulo}")
+    st.dataframe(
+        styler,
+        use_container_width=True,
+        hide_index=True,
+        height=(len(res_completo) + 1) * 35 + 5
+    )
+
 def mostrar_vista_comparativa(df: pd.DataFrame):
     st.header("📈 Comparativa de Ventas Año contra Año")
 
@@ -62,14 +128,13 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     proveedores_disponibles = sorted(df['CLASIFICACION_1'].dropna().unique())
     lista_vistas = ["📊 Consolidado General (Sedisur)"] + [f"Proveedor: {p}" for p in proveedores_disponibles]
 
-    # Inicializar el índice de navegación en session_state si no existe
     if "indice_vista_prov" not in st.session_state:
         st.session_state["indice_vista_prov"] = 0
 
     if st.session_state["indice_vista_prov"] >= len(lista_vistas):
         st.session_state["indice_vista_prov"] = 0
 
-    # --- BARRA DE CONTROL CON BOTONES (ESTILO ANTERIOR / SIGUIENTE) ---
+    # --- BARRA DE CONTROL CON BOTONES (ANTERIOR / SIGUIENTE) ---
     col_info, col_btn_izq, col_btn_der = st.columns([6, 1, 1])
 
     with col_btn_izq:
@@ -203,6 +268,41 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     fig.update_layout(height=450, hovermode="x unified")
     st.plotly_chart(fig, use_container_width=True)
 
+    # --- RESTAURACIÓN DE LAS TABLAS INFERIORES POR PROVEEDOR Y CATEGORÍA ---
+    st.divider()
+    st.header("🏢 Comparativa por Proveedores y Categorías")
+
+    generar_tabla_comparativa_formateada(df_analisis, 'CLASIFICACION_1', f'Resumen ({seleccion_actual})')
+
+    st.markdown("---")
+
+    proveedores_excluidos = [
+        'AB-INBEV', 'BAYER', 'BEL PREMIUM', 'CODOMI',  
+        'FARMANOVA', 'GRUPO Q.', 'HEALTH. RB.', 'HEALTH',  
+        'REYA CR.', 'RECKITT'
+    ]
+
+    orden_proveedores = [
+        'COLGATE_PALM',
+        'ESSITY',
+        'HEINZ.CR',
+        'ALIMER S.A.',
+        'PEPSICO',
+        'BARRAZA'
+    ]
+
+    proveedores_disponibles_sub = df_analisis['CLASIFICACION_1'].dropna().unique()
+    proveedores_a_mostrar = [p for p in orden_proveedores if p in proveedores_disponibles_sub]
+    otros_proveedores = sorted([p for p in proveedores_disponibles_sub if p not in orden_proveedores])
+    proveedores_finales = proveedores_a_mostrar + otros_proveedores
+
+    for prov in proveedores_finales:
+        prov_limpio = prov.strip()
+        if prov_limpio not in proveedores_excluidos:
+            df_prov = df_analisis[df_analisis['CLASIFICACION_1'].str.strip() == prov_limpio]
+            if not df_prov.empty:
+                generar_tabla_comparativa_formateada(df_prov, 'CLASIFICACION_2', f"Proveedor: {prov}")
+
 # ---------------------------------------------------------
 # 4. Flujo Principal de Ejecución de la App Web
 # ---------------------------------------------------------
@@ -285,5 +385,5 @@ if sel_clientes:
 if sel_vendedores:
     df_filt = df_filt[df_filt['VENDEDOR'].isin(sel_vendedores)]
 
-# Invocación de la Vista Comparativa Interactiva
+# Invocación de la Vista Comparativa Completa
 mostrar_vista_comparativa(df_filt)
