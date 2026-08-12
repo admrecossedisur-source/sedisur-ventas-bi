@@ -4,10 +4,10 @@ import plotly.express as px
 from datetime import datetime
 import io
 
-# Intentar importar ReportLab para la generación del PDF
+# Intentar importar ReportLab para la generación del PDF con soporte de gráficos
 try:
     from reportlab.lib.pagesizes import letter, landscape
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib import colors
     REPORTLAB_DISPONIBLE = True
@@ -129,9 +129,46 @@ def generar_tabla_comparativa_formateada(df_sub: pd.DataFrame, col_group: str, t
     )
 
 # ---------------------------------------------------------
-# 4. Generador de PDF en Bloque
+# 4. Generador de PDF Completo (Tablas + Gráfico en Imagen)
 # ---------------------------------------------------------
-def generar_pdf_reporte(df_analisis, seleccion_actual):
+def construir_datos_tabla_pdf(df_sub, col_group, titulo_col):
+    pivot = pd.pivot_table(
+        df_sub,
+        index=col_group,
+        columns='ANIO',
+        values='VENTA_NETA',
+        aggfunc='sum',
+        fill_value=0
+    ).reset_index()
+
+    anios = sorted([col for col in pivot.columns if col != col_group])
+    if len(anios) < 2:
+        return None, None
+
+    res_df = pd.DataFrame()
+    res_df[titulo_col] = pivot[col_group]
+    a1, a2 = anios[0], anios[1]
+    res_df[str(a1)] = pivot[a1].apply(lambda x: f"₡{x:,.2f}")
+    res_df[str(a2)] = pivot[a2].apply(lambda x: f"₡{x:,.2f}")
+    vars_a = [calcular_variacion(act, ant) for act, ant in zip(pivot[a2], pivot[a1])]
+    res_df['Var %'] = [f"{v:+.1f}%" for v in vars_a]
+
+    totales = {titulo_col: 'TOTAL'}
+    totales[str(a1)] = f"₡{pivot[a1].sum():,.2f}"
+    totales[str(a2)] = f"₡{pivot[a2].sum():,.2f}"
+    totales['Var %'] = f"{calcular_variacion(pivot[a2].sum(), pivot[a1].sum()):+.1f}%"
+
+    df_tot = pd.DataFrame([totales])
+    res_completo = pd.concat([res_df, df_tot], ignore_index=True)
+    
+    headers = list(res_completo.columns)
+    data = [headers]
+    for _, row in res_completo.iterrows():
+        data.append([str(row[h]) for h in headers])
+        
+    return data, headers
+
+def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
     if not REPORTLAB_DISPONIBLE:
         return None
     
@@ -148,26 +185,25 @@ def generar_pdf_reporte(df_analisis, seleccion_actual):
     style_title = ParagraphStyle(
         'TitleStyle',
         parent=styles['Heading1'],
-        fontSize=16,
+        fontSize=14,
         textColor=colors.HexColor("#1f4e78"),
-        spaceAfter=12
+        spaceAfter=10
     )
-    
     style_subtitle = ParagraphStyle(
         'SubTitleStyle',
         parent=styles['Heading2'],
-        fontSize=12,
+        fontSize=11,
         textColor=colors.HexColor("#333333"),
-        spaceAfter=8
+        spaceAfter=6,
+        spaceBefore=10
     )
 
     story.append(Paragraph(f"<b>Informe Ejecutivo Sedisur BI - {seleccion_actual}</b>", style_title))
-    story.append(Paragraph(f"Fecha de generación: {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles['Normal']))
-    story.append(Spacer(1, 15))
+    story.append(Paragraph(f"Generado el: {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles['Normal']))
+    story.append(Spacer(1, 10))
 
     # 1. Tabla Principal Mensual
     story.append(Paragraph("<b>Tabla Comparativa por Mes y Variación Porcentual</b>", style_subtitle))
-    
     pivot_base = pd.pivot_table(
         df_analisis,
         index=['MES_NUM', 'MES_NOMBRE'],
@@ -187,7 +223,6 @@ def generar_pdf_reporte(df_analisis, seleccion_actual):
             fila_totales[anio] = pivot_base[anio].sum()
         
         pivot_completa = pd.concat([pivot_base, pd.DataFrame([fila_totales])], ignore_index=True)
-        
         headers_pdf = ['Mes'] + [str(a) for a in anios_presentes]
         data_pdf = [headers_pdf]
         
@@ -197,28 +232,96 @@ def generar_pdf_reporte(df_analisis, seleccion_actual):
                 fila_vals.append(f"₡{row[anio]:,.2f}")
             data_pdf.append(fila_vals)
             
-        t = Table(data_pdf, colWidths=[80] + [110]*len(anios_presentes))
+        t = Table(data_pdf, colWidths=[70] + [100]*len(anios_presentes))
         t.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1f4e78")),
             ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0,0), (-1,0), 9),
-            ('BOTTOMPADDING', (0,0), (-1,0), 6),
+            ('FONTSIZE', (0,0), (-1,0), 8),
             ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#e2efda")),
             ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
             ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-            ('FONTSIZE', (0,1), (-1,-1), 8),
+            ('FONTSIZE', (0,1), (-1,-1), 7),
         ]))
         story.append(t)
-        story.append(Spacer(1, 20))
+        story.append(Spacer(1, 10))
+
+    # 2. Gráfico en Imagen
+    try:
+        img_bytes = fig_plotly.to_image(format="png", width=700, height=300, scale=2)
+        img_io = io.BytesIO(img_bytes)
+        story.append(Paragraph("<b>Tendencia Evolutiva Mensual</b>", style_subtitle))
+        story.append(RLImage(img_io, width=500, height=210))
+        story.append(Spacer(1, 10))
+    except Exception:
+        pass
+
+    # 3. Tablas Inferiores (Resumen y Proveedores)
+    story.append(Paragraph("<b>Comparativa por Proveedores y Categorías</b>", style_subtitle))
+    
+    # Resumen principal
+    data_res, headers_res = construir_datos_tabla_pdf(df_analisis, 'CLASIFICACION_1', f'Resumen ({seleccion_actual})')
+    if data_res:
+        t_res = Table(data_res, colWidths=[180, 110, 110, 100])
+        t_res.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2f5597")),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,0), (-1,0), 8),
+            ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#e2efda")),
+            ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+            ('FONTSIZE', (0,1), (-1,-1), 7),
+        ]))
+        story.append(t_res)
+        story.append(Spacer(1, 10))
+
+    # Iterar proveedores secundarios
+    orden_personalizado = [
+        'COLGATE_PALM', 'ESSITY', 'PEPSICO', 'HEINZ.CR', 'ALIMER S.A.',
+        'BAYER', 'RECKITT', 'BARRAZA', 'REYA CR.', 'HEALTH. RB.',
+        'GRUPO Q.', 'BEL PREMIUM', 'CODOMI', 'FARMANOVA', 'MUNDOREP', 'PRONUTRE'
+    ]
+    proveedores_excluidos = ['AB-INBEV', 'BAYER', 'BEL PREMIUM', 'CODOMI', 'FARMANOVA', 'GRUPO Q.', 'HEALTH. RB.', 'HEALTH', 'REYA CR.', 'RECKITT']
+    
+    proveedores_disponibles_sub = df_analisis['CLASIFICACION_1'].dropna().unique()
+    proveedores_a_mostrar = [p for p in orden_personalizado if p in proveedores_disponibles_sub]
+    otros_proveedores_sub = sorted([p for p in proveedores_disponibles_sub if p not in orden_personalizado])
+    proveedores_finales_sub = proveedores_a_mostrar + otros_proveedores_sub
+
+    for prov in proveedores_finales_sub:
+        prov_limpio = prov.strip()
+        if prov_limpio not in proveedores_excluidos:
+            df_prov = df_analisis[df_analisis['CLASIFICACION_1'].str.strip() == prov_limpio]
+            if not df_prov.empty:
+                data_prov, _ = construir_datos_tabla_pdf(df_prov, 'CLASIFICACION_2', f"Proveedor: {prov}")
+                if data_prov:
+                    story.append(Spacer(1, 5))
+                    t_p = Table(data_prov, colWidths=[180, 110, 110, 100])
+                    t_p.setStyle(TableStyle([
+                        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#595959")),
+                        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+                        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0,0), (-1,0), 7),
+                        ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#f2f2f2")),
+                        ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
+                        ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+                        ('FONTSIZE', (0,1), (-1,-1), 7),
+                    ]))
+                    story.append(t_p)
 
     doc.build(story)
     buffer.seek(0)
     return buffer
 
 def mostrar_vista_comparativa(df: pd.DataFrame):
-    st.header("📈 Comparativa de Ventas Año contra Año")
+    # --- BARRA SUPERIOR DISCRETA CON TÍTULO Y BOTÓN DE DESCARGA ---
+    col_top_title, col_top_pdf = st.columns([6, 1])
+    with col_top_title:
+        st.header("📈 Comparativa de Ventas Año contra Año")
 
     if df.empty:
         st.warning("No hay datos disponibles con los filtros seleccionados.")
@@ -244,7 +347,50 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     if st.session_state["indice_vista_prov"] >= len(lista_vistas):
         st.session_state["indice_vista_prov"] = 0
 
-    # --- BARRA DE CONTROL CON TRES BOTONES Y DESCARGA PDF ---
+    # --- FILTRAR DATOS SEGÚN LA SELECCIÓN DE LOS BOTONES ---
+    seleccion_actual = lista_vistas[st.session_state["indice_vista_prov"]]
+    if seleccion_actual != "📊 Consolidado General (Sedisur)":
+        proveedor_seleccionado = seleccion_actual.replace("Proveedor: ", "").strip()
+        df_analisis = df[df['CLASIFICACION_1'].str.strip() == proveedor_seleccionado]
+    else:
+        df_analisis = df
+
+    # Generar gráfico preliminar para incluirlo tanto en la vista como en el PDF
+    df_agrupado = df_analisis.groupby(['ANIO', 'MES_NUM', 'MES_NOMBRE'], as_index=False).agg({
+        'VENTA_NETA': 'sum',
+        'CANTIDAD_NETA': 'sum'
+    }).sort_values('MES_NUM')
+    df_agrupado['ANIO_STR'] = df_agrupado['ANIO'].astype(str)
+
+    fig = px.line(
+        df_agrupado,
+        x='MES_NOMBRE',
+        y='VENTA_NETA',
+        color='ANIO_STR',
+        markers=True,
+        title=f"Evolución Mensual Comparativa ({seleccion_actual})",
+        labels={'MES_NOMBRE': 'Mes', 'VENTA_NETA': 'Venta Neta (₡)', 'ANIO_STR': 'Año'},
+        category_orders={'MES_NOMBRE': ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']}
+    )
+    fig.update_traces(hovertemplate="<b>%{x}</b><br>Métrica: ₡%{y:,.2f}<extra></extra>")
+    fig.update_layout(height=450, hovermode="x unified")
+
+    with col_top_pdf:
+        if REPORTLAB_DISPONIBLE:
+            pdf_buffer = generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig)
+            if pdf_buffer:
+                st.download_button(
+                    label="📥 Descargar",
+                    data=pdf_buffer,
+                    file_name=f"Informe_Sedisur_{seleccion_actual.replace(' ', '_')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    help="Descargar informe PDF completo con tablas y gráficos"
+                )
+        else:
+            st.caption("Instale `reportlab` para PDF.")
+
+    # --- BARRA DE CONTROL CON TRES BOTONES (ANTERIOR, SEDISUR, SIGUIENTE) ---
     col_info, col_btn_izq, col_btn_sedisur, col_btn_der = st.columns([3.5, 1.1, 1.1, 1.1])
 
     with col_btn_izq:
@@ -262,33 +408,8 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
             st.session_state["indice_vista_prov"] = (st.session_state["indice_vista_prov"] + 1) % len(lista_vistas)
             st.rerun()
 
-    seleccion_actual = lista_vistas[st.session_state["indice_vista_prov"]]
-
     with col_info:
         st.markdown(f"### 🏷️ Analizando: **{seleccion_actual}**")
-
-    st.divider()
-
-    # --- FILTRAR DATOS SEGÚN LA SELECCIÓN DE LOS BOTONES ---
-    if seleccion_actual != "📊 Consolidado General (Sedisur)":
-        proveedor_seleccionado = seleccion_actual.replace("Proveedor: ", "").strip()
-        df_analisis = df[df['CLASIFICACION_1'].str.strip() == proveedor_seleccionado]
-    else:
-        df_analisis = df
-
-    # --- BOTÓN DE DESCARGA PDF ---
-    if REPORTLAB_DISPONIBLE:
-        pdf_buffer = generar_pdf_reporte(df_analisis, seleccion_actual)
-        if pdf_buffer:
-            st.download_button(
-                label="📥 Descargar Informe en PDF",
-                data=pdf_buffer,
-                file_name=f"Informe_Sedisur_{seleccion_actual.replace(' ', '_')}.pdf",
-                mime="application/pdf",
-                use_container_width=True
-            )
-    else:
-        st.caption("💡 Para habilitar la descarga en PDF, asegúrate de instalar la librería `reportlab`.")
 
     st.divider()
 
@@ -358,45 +479,7 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     st.divider()
 
     # --- GRÁFICO DE TENDENCIA EVOLUTIVA MENSUAL ---
-    df_agrupado = df_analisis.groupby(['ANIO', 'MES_NUM', 'MES_NOMBRE'], as_index=False).agg({
-        'VENTA_NETA': 'sum',
-        'CANTIDAD_NETA': 'sum'
-    }).sort_values('MES_NUM')
-
-    df_agrupado['ANIO_STR'] = df_agrupado['ANIO'].astype(str)
-
     st.subheader("📉 Tendencia Evolutiva Mensual")
-
-    tipo_grafico = st.radio(
-        "Métrica a visualizar en el gráfico:",
-        options=["Venta Neta (₡)", "Cantidad Neta"],
-        horizontal=True,
-        key="radio_metrica_grafico_dinamico"
-    )
-
-    columna_y = 'VENTA_NETA' if tipo_grafico == "Venta Neta (₡)" else 'CANTIDAD_NETA'
-
-    fig = px.line(
-        df_agrupado,
-        x='MES_NOMBRE',
-        y=columna_y,
-        color='ANIO_STR',
-        markers=True,
-        title=f"Evolución Mensual Comparativa ({seleccion_actual}): {tipo_grafico}",
-        labels={
-            'MES_NOMBRE': 'Mes',
-            columna_y: tipo_grafico,
-            'ANIO_STR': 'Año'
-        },
-        category_orders={'MES_NOMBRE': ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']}
-    )
-
-    if tipo_grafico == "Venta Neta (₡)":
-        fig.update_traces(hovertemplate="<b>%{x}</b><br>Métrica: ₡%{y:,.2f}<extra></extra>")
-    else:
-        fig.update_traces(hovertemplate="<b>%{x}</b><br>Métrica: %{y:,.0f}<extra></extra>")
-
-    fig.update_layout(height=450, hovermode="x unified")
     st.plotly_chart(fig, use_container_width=True)
 
     # --- RESTAURACIÓN DE LAS TABLAS INFERIORES ---
@@ -426,7 +509,7 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
                 generar_tabla_comparativa_formateada(df_prov, 'CLASIFICACION_2', f"Proveedor: {prov}")
 
 # ---------------------------------------------------------
-# 4. Flujo Principal de Ejecución de la App Web
+# 5. Flujo Principal de Ejecución de la App Web
 # ---------------------------------------------------------
 with st.spinner("Cargando datos del reporte..."):
     df_raw = cargar_datos_exactus()
