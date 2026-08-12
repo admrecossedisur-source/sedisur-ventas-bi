@@ -66,7 +66,6 @@ def generar_tabla_comparativa_formateada(df_sub: pd.DataFrame, col_group: str, t
     if df_sub.empty:
         return
 
-    # Forzar la inclusión de 2024, 2025 y 2026 si existen en los datos
     pivot = pd.pivot_table(
         df_sub,
         index=col_group,
@@ -209,7 +208,6 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
 
     story.append(Spacer(1, 8))
 
-    # 1. Tabla Principal Mensual (2024, 2025, 2026 y sus variaciones sin símbolos de moneda)
     story.append(Paragraph("<b>Tabla Comparativa por Mes y Variaciones (2024 - 2025 - 2026)</b>", style_subtitle))
     
     pivot_base = pd.pivot_table(
@@ -263,7 +261,6 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
     story.append(t)
     story.append(Spacer(1, 8))
 
-    # 2. Gráfico en Imagen
     try:
         img_bytes = fig_plotly.to_image(format="png", width=650, height=240, scale=2)
         img_io = io.BytesIO(img_bytes)
@@ -273,7 +270,6 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
     except Exception:
         pass
 
-    # 3. Tablas Inferiores (Resumen Proveedores)
     story.append(Paragraph("<b>Comparativa por Proveedores y Categorías</b>", style_subtitle))
     
     data_res, headers_res = construir_datos_tabla_pdf(df_analisis, 'CLASIFICACION_1', f'Resumen ({seleccion_actual})')
@@ -384,18 +380,10 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     fig.update_traces(hovertemplate="<b>%{x}</b><br>Métrica: %{y:,.2f}<extra></extra>")
     fig.update_layout(height=450, hovermode="x unified")
 
-    with col_top_pdf:
-        if REPORTLAB_DISPONIBLE:
-            pdf_buffer = generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig)
-            if pdf_buffer:
-                st.download_button(
-                    label="📥 Descargar",
-                    data=pdf_buffer,
-                    file_name=f"Informe_Sedisur_{seleccion_actual.replace(' ', '_')}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True,
-                    help="Descargar informe PDF completo con tablas y gráficos"
-                )
+    # Guardamos el botón de descarga para ubicarlo junto al de recargar datos en el panel de filtros
+    pdf_buffer_global = None
+    if REPORTLAB_DISPONIBLE:
+        pdf_buffer_global = generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig)
 
     col_info, col_btn_izq, col_btn_sedisur, col_btn_der = st.columns([3.5, 1.1, 1.1, 1.1])
 
@@ -426,7 +414,6 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     else:
         st.subheader("📊 Tabla Comparativa por Mes y Variaciones (2024 - 2025 - 2026)")
 
-    # --- CONSTRUCCIÓN DE LA TABLA PRINCIPAL (2024, 2025, 2026 con sus Var %) ---
     pivot_base = pd.pivot_table(
         df_analisis,
         index=['MES_NUM', 'MES_NOMBRE'],
@@ -471,11 +458,9 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
 
     st.divider()
 
-    # --- GRÁFICO DE TENDENCIA EVOLUTIVA MENSUAL ---
     st.subheader("📉 Tendencia Evolutiva Mensual")
     st.plotly_chart(fig, use_container_width=True)
 
-    # --- TABLAS INFERIORES ---
     st.divider()
     st.header("🏢 Comparativa por Proveedores y Categorías")
 
@@ -500,6 +485,8 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
             df_prov = df_analisis[df_analisis['CLASIFICACION_1'].str.strip() == prov_limpio]
             if not df_prov.empty:
                 generar_tabla_comparativa_formateada(df_prov, 'CLASIFICACION_2', f"Proveedor: {prov}")
+
+    return pdf_buffer_global
 
 # ---------------------------------------------------------
 # 5. Flujo Principal de Ejecución de la App Web
@@ -530,16 +517,33 @@ if "filtro_vendedores" not in st.session_state:
 
 # --- PANEL DE FILTROS ---
 with st.expander("🔍 **Panel de Filtros Comerciales**", expanded=True):
-    col_btn1, col_btn2 = st.columns([1, 3])
+    # Filtrado previo para obtener la referencia del buffer PDF de descarga en la parte superior
+    df_temp = df_raw.copy()
+    if st.session_state["filtro_anios"]:
+        df_temp = df_temp[df_temp['ANIO'].isin(st.session_state["filtro_anios"])]
+    if st.session_state["filtro_meses"]:
+        df_temp = df_temp[df_temp['MES_NOMBRE'].isin(st.session_state["filtro_meses"])]
+    if st.session_state["filtro_marcas"]:
+        df_temp = df_temp[df_temp['CLASIFICACION_1'].isin(st.session_state["filtro_marcas"])]
+    if st.session_state["filtro_cats"]:
+        df_temp = df_temp[df_temp['CATEGORIA_CLIENTE'].isin(st.session_state["filtro_cats"])]
+    if st.session_state["filtro_clientes"]:
+        df_temp = df_temp[df_temp['CLIENTE_DISPLAY'].isin(st.session_state["filtro_clientes"])]
+    if st.session_state["filtro_vendedores"]:
+        df_temp = df_temp[df_temp['VENDEDOR'].isin(st.session_state["filtro_vendedores"])]
+
+    # Botones superiores en el panel: Recargar Datos y Descargar Informe
+    col_btn1, col_btn_desc, col_space = st.columns([1.2, 1.2, 4.6])
     with col_btn1:
-        if st.button("🔄 Recargar Datos", help="Limpia la caché y vuelve a leer el archivo de datos"):
+        if st.button("🔄 Recargar Datos", help="Limpia la caché y vuelve a leer el archivo de datos", use_container_width=True):
             cargar_datos_exactus.clear()
             st.toast("¡Datos recargados correctamente!", icon="✅")
             st.rerun()
 
     st.markdown("---")
 
-    col1, col2, col3, col4 = st.columns(4)
+    # Distribución ordenada de los filtros (Vendedor ubicado justo debajo del filtro de Cliente)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         anios_disponibles = sorted(df_raw['ANIO'].unique(), reverse=True)
@@ -560,11 +564,10 @@ with st.expander("🔍 **Panel de Filtros Comerciales**", expanded=True):
         clientes = sorted(df_raw['CLIENTE_DISPLAY'].dropna().unique())
         sel_clientes = st.multiselect("Cliente", clientes, key="filtro_clientes")
 
-    with col4:
         vendedores = sorted(df_raw['VENDEDOR'].dropna().unique())
         sel_vendedores = st.multiselect("Vendedor", vendedores, key="filtro_vendedores")
 
-# Filtrado de DataFrame
+# Filtrado definitivo de DataFrame
 df_filt = df_raw.copy()
 
 if sel_anios:
@@ -580,5 +583,16 @@ if sel_clientes:
 if sel_vendedores:
     df_filt = df_filt[df_filt['VENDEDOR'].isin(sel_vendedores)]
 
-# Invocación de la Vista
-mostrar_vista_comparativa(df_filt)
+# Invocación de la Vista y renderizado del botón de descarga superior junto al de recargar
+pdf_buffer_generado = mostrar_vista_comparativa(df_filt)
+
+with col_btn_desc:
+    if REPORTLAB_DISPONIBLE and pdf_buffer_generado:
+        st.download_button(
+            label="📥 Descargar PDF",
+            data=pdf_buffer_generado,
+            file_name="Informe_Sedisur_Ejecutivo.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            help="Descargar informe PDF completo con tablas y gráficos"
+        )
