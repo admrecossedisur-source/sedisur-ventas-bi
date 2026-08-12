@@ -129,7 +129,7 @@ def generar_tabla_comparativa_formateada(df_sub: pd.DataFrame, col_group: str, t
     )
 
 # ---------------------------------------------------------
-# 4. Generador de PDF Completo (A4, Márgenes Estrechos, Azul Claro)
+# 4. Generador de PDF Completo (A4, Márgenes Estrechos, Símbolo ₡)
 # ---------------------------------------------------------
 def construir_datos_tabla_pdf(df_sub, col_group, titulo_col):
     pivot = pd.pivot_table(
@@ -148,14 +148,14 @@ def construir_datos_tabla_pdf(df_sub, col_group, titulo_col):
     res_df = pd.DataFrame()
     res_df[titulo_col] = pivot[col_group]
     a1, a2 = anios[0], anios[1]
-    res_df[str(a1)] = pivot[a1].apply(lambda x: f"CRC {x:,.2f}")
-    res_df[str(a2)] = pivot[a2].apply(lambda x: f"CRC {x:,.2f}")
+    res_df[str(a1)] = pivot[a1].apply(lambda x: f"₡{x:,.2f}")
+    res_df[str(a2)] = pivot[a2].apply(lambda x: f"₡{x:,.2f}")
     vars_a = [calcular_variacion(act, ant) for act, ant in zip(pivot[a2], pivot[a1])]
     res_df['Var %'] = [f"{v:+.1f}%" for v in vars_a]
 
     totales = {titulo_col: 'TOTAL'}
-    totales[str(a1)] = f"CRC {pivot[a1].sum():,.2f}"
-    totales[str(a2)] = f"CRC {pivot[a2].sum():,.2f}"
+    totales[str(a1)] = f"₡{pivot[a1].sum():,.2f}"
+    totales[str(a2)] = f"₡{pivot[a2].sum():,.2f}"
     totales['Var %'] = f"{calcular_variacion(pivot[a2].sum(), pivot[a1].sum()):+.1f}%"
 
     df_tot = pd.DataFrame([totales])
@@ -212,7 +212,7 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
 
     story.append(Spacer(1, 8))
 
-    # 1. Tabla Principal Mensual (Formato idéntico a la captura por años)
+    # 1. Tabla Principal Mensual (Incluyendo 2026 completo y con símbolo ₡)
     story.append(Paragraph("<b>Tabla Comparativa por Mes y Variación Porcentual</b>", style_subtitle))
     pivot_base = pd.pivot_table(
         df_analisis,
@@ -239,7 +239,7 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
         for _, row in pivot_completa.iterrows():
             fila_vals = [str(row['Mes'])]
             for anio in anios_presentes:
-                fila_vals.append(f"CRC {row[anio]:,.2f}")
+                fila_vals.append(f"₡{row[anio]:,.2f}")
             data_pdf.append(fila_vals)
             
         t = Table(data_pdf, colWidths=[65] + [90]*len(anios_presentes))
@@ -420,7 +420,7 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     else:
         st.subheader("📊 Tabla Comparativa por Mes y Variación Porcentual")
 
-    # --- CONSTRUCCIÓN DE LA TABLA PRINCIPAL (AÑOS COMO COLUMNAS EXACTO A TU CAPTURA) ---
+    # --- CONSTRUCCIÓN DE LA TABLA PRINCIPAL (RESTAURO DE VARIACIONES + AÑO 2026) ---
     pivot_base = pd.pivot_table(
         df_analisis,
         index=['MES_NUM', 'MES_NOMBRE'],
@@ -444,11 +444,30 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     df_resultado = pd.DataFrame()
     df_resultado['Mes'] = pivot_completa['Mes']
 
-    for anio in anios_presentes:
-        df_resultado[str(anio)] = pivot_completa[anio].apply(lambda x: f"₡{x:,.2f}")
+    if len(anios_presentes) > 0:
+        primer_anio = anios_presentes[0]
+        df_resultado[str(primer_anio)] = pivot_completa[primer_anio].apply(lambda x: f"₡{x:,.2f}")
 
+    columnas_variacion = []
+    for i in range(1, len(anios_presentes)):
+        anio_anterior = anios_presentes[i - 1]
+        anio_actual = anios_presentes[i]
+
+        col_var_nombre = f"Var % ({str(anio_actual)[-2:]} vs {str(anio_anterior)[-2:]})"
+        columnas_variacion.append(col_var_nombre)
+
+        variaciones = [
+            calcular_variacion(actual, anterior)
+            for actual, anterior in zip(pivot_completa[anio_actual], pivot_completa[anio_anterior])
+        ]
+
+        df_resultado[str(anio_actual)] = pivot_completa[anio_actual].apply(lambda x: f"₡{x:,.2f}")
+        df_resultado[col_var_nombre] = [f"{v:+.2f}%" for v in variaciones]
+
+    styler = df_resultado.style.map(resaltar_variaciones, subset=columnas_variacion)
+    
     st.dataframe(
-        df_resultado, 
+        styler, 
         use_container_width=True, 
         hide_index=True,
         height=(len(df_resultado) + 1) * 35 + 3
