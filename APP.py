@@ -2,6 +2,17 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 from datetime import datetime
+import io
+
+# Intentar importar ReportLab para la generación del PDF
+try:
+    from reportlab.lib.pagesizes import letter, landscape
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib import colors
+    REPORTLAB_DISPONIBLE = True
+except ImportError:
+    REPORTLAB_DISPONIBLE = False
 
 # ---------------------------------------------------------
 # 1. Configuración Inicial de la Página
@@ -117,6 +128,95 @@ def generar_tabla_comparativa_formateada(df_sub: pd.DataFrame, col_group: str, t
         height=(len(res_completo) + 1) * 35 + 5
     )
 
+# ---------------------------------------------------------
+# 4. Generador de PDF en Bloque
+# ---------------------------------------------------------
+def generar_pdf_reporte(df_analisis, seleccion_actual):
+    if not REPORTLAB_DISPONIBLE:
+        return None
+    
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, 
+        pagesize=landscape(letter),
+        rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30
+    )
+    
+    story = []
+    styles = getSampleStyleSheet()
+    
+    style_title = ParagraphStyle(
+        'TitleStyle',
+        parent=styles['Heading1'],
+        fontSize=16,
+        textColor=colors.HexColor("#1f4e78"),
+        spaceAfter=12
+    )
+    
+    style_subtitle = ParagraphStyle(
+        'SubTitleStyle',
+        parent=styles['Heading2'],
+        fontSize=12,
+        textColor=colors.HexColor("#333333"),
+        spaceAfter=8
+    )
+
+    story.append(Paragraph(f"<b>Informe Ejecutivo Sedisur BI - {seleccion_actual}</b>", style_title))
+    story.append(Paragraph(f"Fecha de generación: {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles['Normal']))
+    story.append(Spacer(1, 15))
+
+    # 1. Tabla Principal Mensual
+    story.append(Paragraph("<b>Tabla Comparativa por Mes y Variación Porcentual</b>", style_subtitle))
+    
+    pivot_base = pd.pivot_table(
+        df_analisis,
+        index=['MES_NUM', 'MES_NOMBRE'],
+        columns='ANIO',
+        values='VENTA_NETA',
+        aggfunc='sum',
+        fill_value=0
+    ).reset_index()
+
+    pivot_base = pivot_base.sort_values('MES_NUM').drop(columns=['MES_NUM'])
+    pivot_base.rename(columns={'MES_NOMBRE': 'Mes'}, inplace=True)
+    anios_presentes = sorted([col for col in pivot_base.columns if col != 'Mes'])
+
+    if len(anios_presentes) >= 2:
+        fila_totales = {'Mes': 'TOTAL GENERAL'}
+        for anio in anios_presentes:
+            fila_totales[anio] = pivot_base[anio].sum()
+        
+        pivot_completa = pd.concat([pivot_base, pd.DataFrame([fila_totales])], ignore_index=True)
+        
+        headers_pdf = ['Mes'] + [str(a) for a in anios_presentes]
+        data_pdf = [headers_pdf]
+        
+        for _, row in pivot_completa.iterrows():
+            fila_vals = [str(row['Mes'])]
+            for anio in anios_presentes:
+                fila_vals.append(f"₡{row[anio]:,.2f}")
+            data_pdf.append(fila_vals)
+            
+        t = Table(data_pdf, colWidths=[80] + [110]*len(anios_presentes))
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1f4e78")),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,0), (-1,0), 9),
+            ('BOTTOMPADDING', (0,0), (-1,0), 6),
+            ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#e2efda")),
+            ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+            ('FONTSIZE', (0,1), (-1,-1), 8),
+        ]))
+        story.append(t)
+        story.append(Spacer(1, 20))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
 def mostrar_vista_comparativa(df: pd.DataFrame):
     st.header("📈 Comparativa de Ventas Año contra Año")
 
@@ -126,27 +226,12 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
 
     # --- ORDEN PERSONALIZADO DE PROVEEDORES ---
     orden_personalizado = [
-        'COLGATE_PALM',
-        'ESSITY',
-        'PEPSICO',
-        'HEINZ.CR',
-        'ALIMER S.A.',
-        'BAYER',
-        'RECKITT',
-        'BARRAZA',
-        'REYA CR.',
-        'HEALTH. RB.',
-        'GRUPO Q.',
-        'BEL PREMIUM',
-        'CODOMI',
-        'FARMANOVA',
-        'MUNDOREP',
-        'PRONUTRE'
+        'COLGATE_PALM', 'ESSITY', 'PEPSICO', 'HEINZ.CR', 'ALIMER S.A.',
+        'BAYER', 'RECKITT', 'BARRAZA', 'REYA CR.', 'HEALTH. RB.',
+        'GRUPO Q.', 'BEL PREMIUM', 'CODOMI', 'FARMANOVA', 'MUNDOREP', 'PRONUTRE'
     ]
 
     proveedores_disponibles_df = df['CLASIFICACION_1'].dropna().unique()
-    
-    # Ordenar según la lista estricta proporcionada, y agregar al final cualquier otro que surja
     proveedores_ordenados = [p for p in orden_personalizado if p in proveedores_disponibles_df]
     otros_proveedores = sorted([p for p in proveedores_disponibles_df if p not in orden_personalizado])
     
@@ -159,8 +244,8 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     if st.session_state["indice_vista_prov"] >= len(lista_vistas):
         st.session_state["indice_vista_prov"] = 0
 
-    # --- BARRA DE CONTROL CON TRES BOTONES (ANTERIOR, SEDISUR, SIGUIENTE) ---
-    col_info, col_btn_izq, col_btn_sedisur, col_btn_der = st.columns([4, 1.2, 1.2, 1.2])
+    # --- BARRA DE CONTROL CON TRES BOTONES Y DESCARGA PDF ---
+    col_info, col_btn_izq, col_btn_sedisur, col_btn_der = st.columns([3.5, 1.1, 1.1, 1.1])
 
     with col_btn_izq:
         if st.button("◀ Anterior", use_container_width=True):
@@ -190,6 +275,22 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
         df_analisis = df[df['CLASIFICACION_1'].str.strip() == proveedor_seleccionado]
     else:
         df_analisis = df
+
+    # --- BOTÓN DE DESCARGA PDF ---
+    if REPORTLAB_DISPONIBLE:
+        pdf_buffer = generar_pdf_reporte(df_analisis, seleccion_actual)
+        if pdf_buffer:
+            st.download_button(
+                label="📥 Descargar Informe en PDF",
+                data=pdf_buffer,
+                file_name=f"Informe_Sedisur_{seleccion_actual.replace(' ', '_')}.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
+    else:
+        st.caption("💡 Para habilitar la descarga en PDF, asegúrate de instalar la librería `reportlab`.")
+
+    st.divider()
 
     clientes_unicos = df_analisis['CLIENTE'].unique()
     if len(clientes_unicos) == 1:
