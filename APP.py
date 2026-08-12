@@ -230,7 +230,8 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
         fontSize=10,
         textColor=colors.HexColor("#333333"),
         spaceAfter=4,
-        spaceBefore=6
+        spaceBefore=6,
+        keepWithNext=True  # Evita que el título quede huérfano al final de la página
     )
 
     story.append(Paragraph(f"<b>Informe Ejecutivo Sedisur BI - {seleccion_actual}</b>", style_title))
@@ -248,10 +249,10 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
     story.append(Spacer(1, 8))
 
     # Definir los proveedores específicos solicitados para las 6 tablas mensuales iniciales
-    proveedores_principales = ['COLGATE_PALM', 'ESSITY', 'HEINZ.CR', 'ALIMER S.A.', 'PEPSICO']
+    proveedores_principales = ['COLGATE_PALM', 'ESSITY', 'HEINZ.CR', 'ALIMER S.A.,', 'PEPSICO']
 
-    # 1. Tabla General Consolidada
-    story.append(Paragraph("<b>Tabla Comparativa por Mes y Variaciones (2024 - 2025 - 2026) - Consolidado General</b>", style_subtitle))
+    # 1. Tabla General Consolidada (Agrupada con su título en KeepTogether para prevenir saltos de página separados)
+    titulo_gen = Paragraph("<b>Tabla Comparativa por Mes y Variaciones (2024 - 2025 - 2026) - Consolidado General</b>", style_subtitle)
     data_gen = construir_datos_tabla_mensual_pdf(df_analisis)
     t_gen = Table(data_gen, colWidths=[65, 75, 75, 75, 75, 75])
     t_gen.setStyle(TableStyle([
@@ -265,14 +266,14 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
         ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
         ('FONTSIZE', (0,1), (-1,-1), 6.5),
     ]))
-    story.append(t_gen)
+    story.append(KeepTogether([titulo_gen, t_gen]))
     story.append(Spacer(1, 8))
 
-    # 2. Las 5 tablas adicionales para los proveedores específicos (Colgate, Essity, Heinz, Alimer, Pepsico)
+    # 2. Las 5 tablas adicionales para los proveedores específicos envueltas con sus títulos en KeepTogether
     for prov_esp in proveedores_principales:
         df_prov_esp = df_analisis[df_analisis['CLASIFICACION_1'].str.strip() == prov_esp]
         if not df_prov_esp.empty:
-            story.append(Paragraph(f"<b>Tabla Comparativa por Mes y Variaciones (2024 - 2025 - 2026) - Proveedor: {prov_esp}</b>", style_subtitle))
+            titulo_esp = Paragraph(f"<b>Tabla Comparativa por Mes y Variaciones (2024 - 2025 - 2026) - Proveedor: {prov_esp}</b>", style_subtitle)
             data_esp = construir_datos_tabla_mensual_pdf(df_prov_esp)
             t_esp = Table(data_esp, colWidths=[65, 75, 75, 75, 75, 75])
             t_esp.setStyle(TableStyle([
@@ -286,19 +287,19 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
                 ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
                 ('FONTSIZE', (0,1), (-1,-1), 6.5),
             ]))
-            story.append(KeepTogether([t_esp, Spacer(1, 8)]))
+            story.append(KeepTogether([titulo_esp, t_esp]))
+            story.append(Spacer(1, 8))
 
     try:
         img_bytes = fig_plotly.to_image(format="png", width=650, height=240, scale=2)
         img_io = io.BytesIO(img_bytes)
-        story.append(Paragraph("<b>Tendencia Evolutiva Mensual</b>", style_subtitle))
-        story.append(RLImage(img_io, width=420, height=155))
+        titulo_img = Paragraph("<b>Tendencia Evolutiva Mensual</b>", style_subtitle)
+        story.append(KeepTogether([titulo_img, RLImage(img_io, width=420, height=155)]))
         story.append(Spacer(1, 8))
     except Exception:
         pass
 
-    story.append(Paragraph("<b>Comparativa por Proveedores y Categorías</b>", style_subtitle))
-    
+    titulo_comp_prov = Paragraph("<b>Comparativa por Proveedores y Categorías</b>", style_subtitle)
     data_res, headers_res = construir_datos_tabla_pdf(df_analisis, 'CLASIFICACION_1', f'Resumen ({seleccion_actual})')
     if data_res:
         t_res = Table(data_res, colWidths=[130, 70, 70, 65, 70, 65])
@@ -313,7 +314,7 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
             ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
             ('FONTSIZE', (0,1), (-1,-1), 6.5),
         ]))
-        story.append(t_res)
+        story.append(KeepTogether([titulo_comp_prov, t_res]))
         story.append(Spacer(1, 6))
 
     orden_personalizado = [
@@ -582,10 +583,10 @@ with st.expander("🔍 **Panel de Filtros Comerciales**", expanded=True):
 
     with col2:
         marcas = sorted(df_raw['CLASIFICACION_1'].dropna().unique())
-        sel_marcas = st.multiselect("Clasificación 1 (Marca)", marcas, key="filtro_marcas")
+        sel_marcas = st.multiselect("Clasificación 1 (Marca)", marcas, key="fil_marcas")
         
         categorias = sorted(df_raw['CATEGORIA_CLIENTE'].dropna().unique())
-        sel_cats = st.multiselect("Categoría Cliente", categorias, key="filtro_cats")
+        sel_cats = st.multiselect("Categoría Cliente", categorias, key="fil_cats")
 
     with col3:
         clientes = sorted(df_raw['CLIENTE_DISPLAY'].dropna().unique())
