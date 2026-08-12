@@ -15,6 +15,51 @@ except ImportError:
     REPORTLAB_DISPONIBLE = False
 
 # ---------------------------------------------------------
+# 0. Sistema de Autenticación de Usuarios
+# ---------------------------------------------------------
+USUARIOS_PERMITIDOS = {
+    "kenneth.martinez@sedisur.com": {"password": "Kem000", "cargo": "Gerencia", "rol": "Usuario"},
+    "custodio.arias@sedisur.com": {"password": "Cua000", "cargo": "Gerencia", "rol": "Usuario"},
+    "henry.azofeifa@sedisur.com": {"password": "Hea000", "cargo": "Gerencia", "rol": "Usuario"},
+    "diego.barrantes@sedisur.com": {"password": "Dib000", "cargo": "Supervisión", "rol": "Usuario"},
+    "harvy.arbustini@sedisur.com": {"password": "Haa000", "cargo": "Supervisión", "rol": "Usuario"},
+    "eddy.zuniga@sedisur.com": {"password": "Edz000", "cargo": "Supervisión", "rol": "Usuario"},
+    "cristina.nunez@sedisur.com": {"password": "Crn000", "cargo": "Supervisión", "rol": "administrador"},
+    "erick.abarca@sedisur.com": {"password": "Era000", "cargo": "Supervisión", "rol": "Usuario"},
+    "rafael.romero@sedisur.com": {"password": "Rar000", "cargo": "Supervisión", "rol": "administrador"}
+}
+
+def verificar_acceso():
+    if "autenticado" not in st.session_state:
+        st.session_state["autenticado"] = False
+
+    if st.session_state["autenticado"]:
+        return True
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("## 🔐 Inicio de Sesión - Sedisur BI")
+        st.markdown("Por favor, ingrese sus credenciales corporativas para acceder al sistema.")
+
+        with st.form("form_login"):
+            correo = st.text_input("Correo electrónico").strip().lower()
+            password = st.text_input("Contraseña", type="password")
+            submit = st.form_submit_button("Ingresar", use_container_width=True)
+
+            if submit:
+                if correo in USUARIOS_PERMITIDOS and USUARIOS_PERMITIDOS[correo]["password"] == password:
+                    st.session_state["autenticado"] = True
+                    st.session_state["usuario_actual"] = correo
+                    st.session_state["cargo_actual"] = USUARIOS_PERMITIDOS[correo]["cargo"]
+                    st.session_state["rol_actual"] = USUARIOS_PERMITIDOS[correo]["rol"]
+                    st.success("¡Acceso concedido!")
+                    st.rerun()
+                else:
+                    st.error("Correo o contraseña incorrectos.")
+    
+    return False
+
+# ---------------------------------------------------------
 # 1. Configuración Inicial de la Página
 # ---------------------------------------------------------
 st.set_page_config(
@@ -231,7 +276,7 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
         textColor=colors.HexColor("#333333"),
         spaceAfter=4,
         spaceBefore=6,
-        keepWithNext=True  # Evita que el título quede huérfano al final de la página
+        keepWithNext=True
     )
 
     story.append(Paragraph(f"<b>Informe Ejecutivo Sedisur BI - {seleccion_actual}</b>", style_title))
@@ -248,10 +293,9 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
 
     story.append(Spacer(1, 8))
 
-    # Definir los proveedores específicos solicitados para las 6 tablas mensuales iniciales
-    proveedores_principales = ['COLGATE_PALM', 'ESSITY', 'HEINZ.CR', 'ALIMER S.A.,', 'PEPSICO']
+    proveedores_principales = ['COLGATE_PALM', 'ESSITY', 'HEINZ.CR', 'ALIMER S.A.', 'PEPSICO']
 
-    # 1. Tabla General Consolidada (Agrupada con su título en KeepTogether para prevenir saltos de página separados)
+    # 1. Tabla General Consolidada
     titulo_gen = Paragraph("<b>Tabla Comparativa por Mes y Variaciones (2024 - 2025 - 2026) - Consolidado General</b>", style_subtitle)
     data_gen = construir_datos_tabla_mensual_pdf(df_analisis)
     t_gen = Table(data_gen, colWidths=[65, 75, 75, 75, 75, 75])
@@ -269,7 +313,7 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
     story.append(KeepTogether([titulo_gen, t_gen]))
     story.append(Spacer(1, 8))
 
-    # 2. Las 5 tablas adicionales para los proveedores específicos envueltas con sus títulos en KeepTogether
+    # 2. Tablas adicionales para los proveedores específicos
     for prov_esp in proveedores_principales:
         df_prov_esp = df_analisis[df_analisis['CLASIFICACION_1'].str.strip() == prov_esp]
         if not df_prov_esp.empty:
@@ -408,7 +452,6 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     fig.update_traces(hovertemplate="<b>%{x}</b><br>Métrica: %{y:,.2f}<extra></extra>")
     fig.update_layout(height=450, hovermode="x unified")
 
-    # Guardamos el botón de descarga para ubicarlo junto al de recargar datos en el panel de filtros
     pdf_buffer_global = None
     if REPORTLAB_DISPONIBLE:
         pdf_buffer_global = generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig)
@@ -517,110 +560,115 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     return pdf_buffer_global
 
 # ---------------------------------------------------------
-# 5. Flujo Principal de Ejecución de la App Web
+# 5. Flujo Principal de Ejecución con Autenticación
 # ---------------------------------------------------------
-with st.spinner("Cargando datos del reporte..."):
-    df_raw = cargar_datos_exactus()
+if verificar_acceso():
+    with st.spinner("Cargando datos del reporte..."):
+        df_raw = cargar_datos_exactus()
 
-# --- INICIALIZACIÓN SEGURA DE ESTADOS EN SESSION_STATE ---
-if "filtro_anios" not in st.session_state:
-    st.session_state["filtro_anios"] = sorted(df_raw['ANIO'].unique(), reverse=True)
+    # --- INICIALIZACIÓN SEGURA DE ESTADOS EN SESSION_STATE ---
+    if "filtro_anios" not in st.session_state:
+        st.session_state["filtro_anios"] = sorted(df_raw['ANIO'].unique(), reverse=True)
 
-if "filtro_meses" not in st.session_state:
-    orden_meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
-                   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
-    st.session_state["filtro_meses"] = [m for m in orden_meses if m in df_raw['MES_NOMBRE'].unique()]
+    if "filtro_meses" not in st.session_state:
+        orden_meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
+                       'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+        st.session_state["filtro_meses"] = [m for m in orden_meses if m in df_raw['MES_NOMBRE'].unique()]
 
-if "filtro_marcas" not in st.session_state:
-    st.session_state["filtro_marcas"] = []
+    if "filtro_marcas" not in st.session_state:
+        st.session_state["filtro_marcas"] = []
 
-if "filtro_cats" not in st.session_state:
-    st.session_state["filtro_cats"] = []
+    if "filtro_cats" not in st.session_state:
+        st.session_state["filtro_cats"] = []
 
-if "filtro_clientes" not in st.session_state:
-    st.session_state["filtro_clientes"] = []
+    if "filtro_clientes" not in st.session_state:
+        st.session_state["filtro_clientes"] = []
 
-if "filtro_vendedores" not in st.session_state:
-    st.session_state["filtro_vendedores"] = []
+    if "filtro_vendedores" not in st.session_state:
+        st.session_state["filtro_vendedores"] = []
 
-# --- PANEL DE FILTROS ---
-with st.expander("🔍 **Panel de Filtros Comerciales**", expanded=True):
-    # Filtrado previo para obtener la referencia del buffer PDF de descarga en la parte superior
-    df_temp = df_raw.copy()
-    if st.session_state["filtro_anios"]:
-        df_temp = df_temp[df_temp['ANIO'].isin(st.session_state["filtro_anios"])]
-    if st.session_state["filtro_meses"]:
-        df_temp = df_temp[df_temp['MES_NOMBRE'].isin(st.session_state["filtro_meses"])]
-    if st.session_state["filtro_marcas"]:
-        df_temp = df_temp[df_temp['CLASIFICACION_1'].isin(st.session_state["filtro_marcas"])]
-    if st.session_state["filtro_cats"]:
-        df_temp = df_temp[df_temp['CATEGORIA_CLIENTE'].isin(st.session_state["filtro_cats"])]
-    if st.session_state["filtro_clientes"]:
-        df_temp = df_temp[df_temp['CLIENTE_DISPLAY'].isin(st.session_state["filtro_clientes"])]
-    if st.session_state["filtro_vendedores"]:
-        df_temp = df_temp[df_temp['VENDEDOR'].isin(st.session_state["filtro_vendedores"])]
-
-    # Botones superiores en el panel: Recargar Datos y Descargar Informe
-    col_btn1, col_btn_desc, col_space = st.columns([1.2, 1.2, 4.6])
-    with col_btn1:
-        if st.button("🔄 Recargar Datos", help="Limpia la caché y vuelve a leer el archivo de datos", use_container_width=True):
-            cargar_datos_exactus.clear()
-            st.toast("¡Datos recargados correctamente!", icon="✅")
+    # --- PANEL DE FILTROS Y BARRA LATERAL DE USUARIO ---
+    with st.sidebar:
+        st.markdown(f"👤 **Usuario:** {st.session_state.get('usuario_actual', '')}")
+        st.markdown(f"💼 **Cargo:** {st.session_state.get('cargo_actual', '')}")
+        st.markdown(f"🛡️ **Rol:** {st.session_state.get('rol_actual', '')}")
+        if st.button("Cerrar Sesión", use_container_width=True):
+            st.session_state["autenticado"] = False
             st.rerun()
+        st.divider()
 
-    st.markdown("---")
+    with st.expander("🔍 **Panel de Filtros Comerciales**", expanded=True):
+        df_temp = df_raw.copy()
+        if st.session_state["filtro_anios"]:
+            df_temp = df_temp[df_temp['ANIO'].isin(st.session_state["filtro_anios"])]
+        if st.session_state["filtro_meses"]:
+            df_temp = df_temp[df_temp['MES_NOMBRE'].isin(st.session_state["filtro_meses"])]
+        if st.session_state["filtro_marcas"]:
+            df_temp = df_temp[df_temp['CLASIFICACION_1'].isin(st.session_state["filtro_marcas"])]
+        if st.session_state["filtro_cats"]:
+            df_temp = df_temp[df_temp['CATEGORIA_CLIENTE'].isin(st.session_state["filtro_cats"])]
+        if st.session_state["filtro_clientes"]:
+            df_temp = df_temp[df_temp['CLIENTE_DISPLAY'].isin(st.session_state["filtro_clientes"])]
+        if st.session_state["filtro_vendedores"]:
+            df_temp = df_temp[df_temp['VENDEDOR'].isin(st.session_state["filtro_vendedores"])]
 
-    # Distribución ordenada de los filtros (Vendedor ubicado justo debajo del filtro de Cliente)
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        anios_disponibles = sorted(df_raw['ANIO'].unique(), reverse=True)
-        sel_anios = st.multiselect("Año", anios_disponibles, key="filtro_anios")
+        col_btn1, col_btn_desc, col_space = st.columns([1.2, 1.2, 4.6])
+        with col_btn1:
+            if st.button("🔄 Recargar Datos", help="Limpia la caché y vuelve a leer el archivo de datos", use_container_width=True):
+                cargar_datos_exactus.clear()
+                st.toast("¡Datos recargados correctamente!", icon="✅")
+                st.rerun()
+
+        st.markdown("---")
+
+        col1, col2, col3 = st.columns(3)
         
-        meses_disponibles = [m for m in ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
-                                        'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'] if m in df_raw['MES_NOMBRE'].unique()]
-        sel_meses = st.multiselect("Mes", meses_disponibles, key="filtro_meses")
+        with col1:
+            anios_disponibles = sorted(df_raw['ANIO'].unique(), reverse=True)
+            sel_anios = st.multiselect("Año", anios_disponibles, key="filtro_anios")
+            
+            meses_disponibles = [m for m in ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
+                                            'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'] if m in df_raw['MES_NOMBRE'].unique()]
+            sel_meses = st.multiselect("Mes", meses_disponibles, key="filtro_meses")
 
-    with col2:
-        marcas = sorted(df_raw['CLASIFICACION_1'].dropna().unique())
-        sel_marcas = st.multiselect("Clasificación 1 (Marca)", marcas, key="fil_marcas")
-        
-        categorias = sorted(df_raw['CATEGORIA_CLIENTE'].dropna().unique())
-        sel_cats = st.multiselect("Categoría Cliente", categorias, key="fil_cats")
+        with col2:
+            marcas = sorted(df_raw['CLASIFICACION_1'].dropna().unique())
+            sel_marcas = st.multiselect("Clasificación 1 (Marca)", marcas, key="filtro_marcas")
+            
+            categorias = sorted(df_raw['CATEGORIA_CLIENTE'].dropna().unique())
+            sel_cats = st.multiselect("Categoría Cliente", categorias, key="filtro_cats")
 
-    with col3:
-        clientes = sorted(df_raw['CLIENTE_DISPLAY'].dropna().unique())
-        sel_clientes = st.multiselect("Cliente", clientes, key="filtro_clientes")
+        with col3:
+            clientes = sorted(df_raw['CLIENTE_DISPLAY'].dropna().unique())
+            sel_clientes = st.multiselect("Cliente", clientes, key="filtro_clientes")
 
-        vendedores = sorted(df_raw['VENDEDOR'].dropna().unique())
-        sel_vendedores = st.multiselect("Vendedor", vendedores, key="filtro_vendedores")
+            vendedores = sorted(df_raw['VENDEDOR'].dropna().unique())
+            sel_vendedores = st.multiselect("Vendedor", vendedores, key="filtro_vendedores")
 
-# Filtrado definitivo de DataFrame
-df_filt = df_raw.copy()
+    df_filt = df_raw.copy()
 
-if sel_anios:
-    df_filt = df_filt[df_filt['ANIO'].isin(sel_anios)]
-if sel_meses:
-    df_filt = df_filt[df_filt['MES_NOMBRE'].isin(sel_meses)]
-if sel_marcas:
-    df_filt = df_filt[df_filt['CLASIFICACION_1'].isin(sel_marcas)]
-if sel_cats:
-    df_filt = df_filt[df_filt['CATEGORIA_CLIENTE'].isin(sel_cats)]
-if sel_clientes:
-    df_filt = df_filt[df_filt['CLIENTE_DISPLAY'].isin(sel_clientes)]
-if sel_vendedores:
-    df_filt = df_filt[df_filt['VENDEDOR'].isin(sel_vendedores)]
+    if sel_anios:
+        df_filt = df_filt[df_filt['ANIO'].isin(sel_anios)]
+    if sel_meses:
+        df_filt = df_filt[df_filt['MES_NOMBRE'].isin(sel_meses)]
+    if sel_marcas:
+        df_filt = df_filt[df_filt['CLASIFICACION_1'].isin(sel_marcas)]
+    if sel_cats:
+        df_filt = df_filt[df_filt['CATEGORIA_CLIENTE'].isin(sel_cats)]
+    if sel_clientes:
+        df_filt = df_filt[df_filt['CLIENTE_DISPLAY'].isin(sel_clientes)]
+    if sel_vendedores:
+        df_filt = df_filt[df_filt['VENDEDOR'].isin(sel_vendedores)]
 
-# Invocación de la Vista y renderizado del botón de descarga superior junto al de recargar
-pdf_buffer_generado = mostrar_vista_comparativa(df_filt)
+    pdf_buffer_generado = mostrar_vista_comparativa(df_filt)
 
-with col_btn_desc:
-    if REPORTLAB_DISPONIBLE and pdf_buffer_generado:
-        st.download_button(
-            label="📥 Descargar PDF",
-            data=pdf_buffer_generado,
-            file_name="Informe_Sedisur_Ejecutivo.pdf",
-            mime="application/pdf",
-            use_container_width=True,
-            help="Descargar informe PDF completo con tablas y gráficos"
-        )
+    with col_btn_desc:
+        if REPORTLAB_DISPONIBLE and pdf_buffer_generado:
+            st.download_button(
+                label="📥 Descargar PDF",
+                data=pdf_buffer_generado,
+                file_name="Informe_Sedisur_Ejecutivo.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                help="Descargar informe PDF completo con tablas y gráficos"
+            )
