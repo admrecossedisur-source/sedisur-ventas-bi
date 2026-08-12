@@ -230,7 +230,7 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
     pivot_base.rename(columns={'MES_NOMBRE': 'Mes'}, inplace=True)
     anios_presentes = sorted([col for col in pivot_base.columns if col != 'Mes'])
 
-    if len(anios_presentes] >= 2:
+    if len(anios_presentes) >= 2:
         fila_totales = {'Mes': 'TOTAL GENERAL'}
         for anio in anios_presentes:
             fila_totales[anio] = pivot_base[anio].sum()
