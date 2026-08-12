@@ -148,14 +148,14 @@ def construir_datos_tabla_pdf(df_sub, col_group, titulo_col):
     res_df = pd.DataFrame()
     res_df[titulo_col] = pivot[col_group]
     a1, a2 = anios[0], anios[1]
-    res_df[str(a1)] = pivot[a1].apply(lambda x: f"₡{x:,.2f}")
-    res_df[str(a2)] = pivot[a2].apply(lambda x: f"₡{x:,.2f}")
+    res_df[str(a1)] = pivot[a1].apply(lambda x: f"CRC {x:,.2f}")
+    res_df[str(a2)] = pivot[a2].apply(lambda x: f"CRC {x:,.2f}")
     vars_a = [calcular_variacion(act, ant) for act, ant in zip(pivot[a2], pivot[a1])]
     res_df['Var %'] = [f"{v:+.1f}%" for v in vars_a]
 
     totales = {titulo_col: 'TOTAL'}
-    totales[str(a1)] = f"₡{pivot[a1].sum():,.2f}"
-    totales[str(a2)] = f"₡{pivot[a2].sum():,.2f}"
+    totales[str(a1)] = f"CRC {pivot[a1].sum():,.2f}"
+    totales[str(a2)] = f"CRC {pivot[a2].sum():,.2f}"
     totales['Var %'] = f"{calcular_variacion(pivot[a2].sum(), pivot[a1].sum()):+.1f}%"
 
     df_tot = pd.DataFrame([totales])
@@ -173,7 +173,6 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
         return None
     
     buffer = io.BytesIO()
-    # A4 en horizontal (landscape) con márgenes estrechos (20 puntos ~ 0.7 cm)
     doc = SimpleDocTemplate(
         buffer, 
         pagesize=A4,
@@ -199,11 +198,9 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
         spaceBefore=6
     )
 
-    # Encabezado principal del reporte
     story.append(Paragraph(f"<b>Informe Ejecutivo Sedisur BI - {seleccion_actual}</b>", style_title))
     story.append(Paragraph(f"Generado el: {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles['Normal']))
     
-    # Contexto de cliente o vendedor en la primera hoja si aplica
     clientes_unicos = df_analisis['CLIENTE'].unique()
     if len(clientes_unicos) == 1:
         story.append(Spacer(1, 4))
@@ -215,7 +212,7 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
 
     story.append(Spacer(1, 8))
 
-    # 1. Tabla Principal Mensual (Total Sedisur o Proveedor analizado)
+    # 1. Tabla Principal Mensual (Formato idéntico a la captura por años)
     story.append(Paragraph("<b>Tabla Comparativa por Mes y Variación Porcentual</b>", style_subtitle))
     pivot_base = pd.pivot_table(
         df_analisis,
@@ -242,12 +239,12 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
         for _, row in pivot_completa.iterrows():
             fila_vals = [str(row['Mes'])]
             for anio in anios_presentes:
-                fila_vals.append(f"₡{row[anio]:,.2f}")
+                fila_vals.append(f"CRC {row[anio]:,.2f}")
             data_pdf.append(fila_vals)
             
         t = Table(data_pdf, colWidths=[65] + [90]*len(anios_presentes))
         t.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#4a90e2")), # Azul claro elegante
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#4a90e2")),
             ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
@@ -260,7 +257,7 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
         story.append(t)
         story.append(Spacer(1, 8))
 
-    # 2. Gráfico en Imagen (Tendencia Evolutiva Mensual)
+    # 2. Gráfico en Imagen
     try:
         img_bytes = fig_plotly.to_image(format="png", width=650, height=240, scale=2)
         img_io = io.BytesIO(img_bytes)
@@ -270,7 +267,7 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
     except Exception:
         pass
 
-    # 3. Tablas Inferiores (Resumen y Proveedores)
+    # 3. Tablas Inferiores
     story.append(Paragraph("<b>Comparativa por Proveedores y Categorías</b>", style_subtitle))
     
     data_res, headers_res = construir_datos_tabla_pdf(df_analisis, 'CLASIFICACION_1', f'Resumen ({seleccion_actual})')
@@ -290,7 +287,6 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
         story.append(t_res)
         story.append(Spacer(1, 6))
 
-    # Iterar proveedores secundarios
     orden_personalizado = [
         'COLGATE_PALM', 'ESSITY', 'PEPSICO', 'HEINZ.CR', 'ALIMER S.A.',
         'BAYER', 'RECKITT', 'BARRAZA', 'REYA CR.', 'HEALTH. RB.',
@@ -312,7 +308,7 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
                 if data_prov:
                     t_p = Table(data_prov, colWidths=[160, 95, 95, 85])
                     t_p.setStyle(TableStyle([
-                        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#5b9bd5")), # Azul claro secundario
+                        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#5b9bd5")),
                         ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
                         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
                         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
@@ -322,7 +318,6 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
                         ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
                         ('FONTSIZE', (0,1), (-1,-1), 6.5),
                     ]))
-                    # Usamos KeepTogether para evitar que una tabla de proveedor se rompa a la mitad entre páginas
                     story.append(KeepTogether([Spacer(1, 4), t_p]))
 
     doc.build(story)
@@ -330,7 +325,6 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
     return buffer
 
 def mostrar_vista_comparativa(df: pd.DataFrame):
-    # --- BARRA SUPERIOR DISCRETA CON TÍTULO Y BOTÓN DE DESCARGA ---
     col_top_title, col_top_pdf = st.columns([6, 1])
     with col_top_title:
         st.header("📈 Comparativa de Ventas Año contra Año")
@@ -339,7 +333,6 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
         st.warning("No hay datos disponibles con los filtros seleccionados.")
         return
 
-    # --- ORDEN PERSONALIZADO DE PROVEEDORES ---
     orden_personalizado = [
         'COLGATE_PALM', 'ESSITY', 'PEPSICO', 'HEINZ.CR', 'ALIMER S.A.',
         'BAYER', 'RECKITT', 'BARRAZA', 'REYA CR.', 'HEALTH. RB.',
@@ -359,7 +352,6 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     if st.session_state["indice_vista_prov"] >= len(lista_vistas):
         st.session_state["indice_vista_prov"] = 0
 
-    # --- FILTRAR DATOS SEGÚN LA SELECCIÓN DE LOS BOTONES ---
     seleccion_actual = lista_vistas[st.session_state["indice_vista_prov"]]
     if seleccion_actual != "📊 Consolidado General (Sedisur)":
         proveedor_seleccionado = seleccion_actual.replace("Proveedor: ", "").strip()
@@ -367,7 +359,6 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     else:
         df_analisis = df
 
-    # Generar gráfico preliminar para la vista y el PDF
     df_agrupado = df_analisis.groupby(['ANIO', 'MES_NUM', 'MES_NOMBRE'], as_index=False).agg({
         'VENTA_NETA': 'sum',
         'CANTIDAD_NETA': 'sum'
@@ -399,10 +390,7 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
                     use_container_width=True,
                     help="Descargar informe PDF completo con tablas y gráficos"
                 )
-        else:
-            st.caption("Instale `reportlab`.")
 
-    # --- BARRA DE CONTROL CON TRES BOTONES (ANTERIOR, SEDISUR, SIGUIENTE) ---
     col_info, col_btn_izq, col_btn_sedisur, col_btn_der = st.columns([3.5, 1.1, 1.1, 1.1])
 
     with col_btn_izq:
@@ -432,7 +420,7 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     else:
         st.subheader("📊 Tabla Comparativa por Mes y Variación Porcentual")
 
-    # --- CONSTRUCCIÓN DE LA TABLA PRINCIPAL ---
+    # --- CONSTRUCCIÓN DE LA TABLA PRINCIPAL (AÑOS COMO COLUMNAS EXACTO A TU CAPTURA) ---
     pivot_base = pd.pivot_table(
         df_analisis,
         index=['MES_NUM', 'MES_NOMBRE'],
@@ -447,9 +435,6 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
 
     anios_presentes = sorted([col for col in pivot_base.columns if col != 'Mes'])
 
-    if len(anios_presentes) < 2:
-        st.info("💡 Selecciona al menos dos años en los filtros para ver la variación porcentual interanual.")
-
     fila_totales = {'Mes': 'TOTAL GENERAL'}
     for anio in anios_presentes:
         fila_totales[anio] = pivot_base[anio].sum()
@@ -459,30 +444,11 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     df_resultado = pd.DataFrame()
     df_resultado['Mes'] = pivot_completa['Mes']
 
-    if len(anios_presentes) > 0:
-        primer_anio = anios_presentes[0]
-        df_resultado[str(primer_anio)] = pivot_completa[primer_anio].apply(lambda x: f"₡{x:,.2f}")
+    for anio in anios_presentes:
+        df_resultado[str(anio)] = pivot_completa[anio].apply(lambda x: f"₡{x:,.2f}")
 
-    columnas_variacion = []
-    for i in range(1, len(anios_presentes)):
-        anio_anterior = anios_presentes[i - 1]
-        anio_actual = anios_presentes[i]
-
-        col_var_nombre = f"Var % ({str(anio_actual)[-2:]} vs {str(anio_anterior)[-2:]})"
-        columnas_variacion.append(col_var_nombre)
-
-        variaciones = [
-            calcular_variacion(actual, anterior)
-            for actual, anterior in zip(pivot_completa[anio_actual], pivot_completa[anio_anterior])
-        ]
-
-        df_resultado[str(anio_actual)] = pivot_completa[anio_actual].apply(lambda x: f"₡{x:,.2f}")
-        df_resultado[col_var_nombre] = [f"{v:+.2f}%" for v in variaciones]
-
-    styler = df_resultado.style.map(resaltar_variaciones, subset=columnas_variacion)
-    
     st.dataframe(
-        styler, 
+        df_resultado, 
         use_container_width=True, 
         hide_index=True,
         height=(len(df_resultado) + 1) * 35 + 3
@@ -494,7 +460,7 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     st.subheader("📉 Tendencia Evolutiva Mensual")
     st.plotly_chart(fig, use_container_width=True)
 
-    # --- RESTAURACIÓN DE LAS TABLAS INFERIORES ---
+    # --- TABLAS INFERIORES ---
     st.divider()
     st.header("🏢 Comparativa por Proveedores y Categorías")
 
@@ -526,16 +492,14 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
 with st.spinner("Cargando datos del reporte..."):
     df_raw = cargar_datos_exactus()
 
-# --- INICIALIZACIÓN SEGURA DE ESTADOS EN SESSION_STATE ---
+# --- INICIALIZACIÓN SEGURA DE ESTADOS EN SESSION_STATE (INCLUYENDO 2026) ---
 if "filtro_anios" not in st.session_state:
     st.session_state["filtro_anios"] = sorted(df_raw['ANIO'].unique(), reverse=True)
 
 if "filtro_meses" not in st.session_state:
-    mes_actual = datetime.now().month
-    mes_limite = mes_actual - 1 if mes_actual > 1 else 12
     orden_meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
                    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
-    st.session_state["filtro_meses"] = [m for i, m in enumerate(orden_meses[:mes_limite]) if m in df_raw['MES_NOMBRE'].unique()]
+    st.session_state["filtro_meses"] = [m for m in orden_meses if m in df_raw['MES_NOMBRE'].unique()]
 
 if "filtro_marcas" not in st.session_state:
     st.session_state["filtro_marcas"] = []
@@ -549,9 +513,8 @@ if "filtro_clientes" not in st.session_state:
 if "filtro_vendedores" not in st.session_state:
     st.session_state["filtro_vendedores"] = []
 
-# --- FILTROS EN PANEL EXPANDIBLE SUPERIOR ---
+# --- PANEL DE FILTROS ---
 with st.expander("🔍 **Panel de Filtros Comerciales**", expanded=True):
-    
     col_btn1, col_btn2 = st.columns([1, 3])
     with col_btn1:
         if st.button("🔄 Recargar Datos", help="Limpia la caché y vuelve a leer el archivo de datos"):
@@ -602,5 +565,5 @@ if sel_clientes:
 if sel_vendedores:
     df_filt = df_filt[df_filt['VENDEDOR'].isin(sel_vendedores)]
 
-# Invocación de la Vista Comparativa Completa
+# Invocación de la Vista
 mostrar_vista_comparativa(df_filt)
