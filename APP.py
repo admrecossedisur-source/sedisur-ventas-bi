@@ -66,6 +66,7 @@ def generar_tabla_comparativa_formateada(df_sub: pd.DataFrame, col_group: str, t
     if df_sub.empty:
         return
 
+    # Forzar la inclusión de 2024, 2025 y 2026 si existen en los datos
     pivot = pd.pivot_table(
         df_sub,
         index=col_group,
@@ -75,49 +76,36 @@ def generar_tabla_comparativa_formateada(df_sub: pd.DataFrame, col_group: str, t
         fill_value=0
     ).reset_index()
 
-    anios = sorted([col for col in pivot.columns if col != col_group])
-    if len(anios) < 2:
-        return
+    anios_deseados = [2024, 2025, 2026]
+    for a in anios_deseados:
+        if a not in pivot.columns:
+            pivot[a] = 0.0
 
     res_df = pd.DataFrame()
     res_df[titulo] = pivot[col_group]
 
-    a1, a2 = anios[0], anios[1]
-    res_df[str(a1)] = pivot[a1].apply(lambda x: f"₡{x:,.2f}")
-    res_df[str(a2)] = pivot[a2].apply(lambda x: f"₡{x:,.2f}")
+    res_df['2024'] = pivot[2024].apply(lambda x: f"{x:,.2f}")
+    res_df['2025'] = pivot[2025].apply(lambda x: f"{x:,.2f}")
     
-    vars_a = [calcular_variacion(act, ant) for act, ant in zip(pivot[a2], pivot[a1])]
-    res_df['IND'] = [f"{v:+.1f}%" if v != 0 else "0.0%" for v in vars_a]
+    var_25_24 = [calcular_variacion(act, ant) for act, ant in zip(pivot[2025], pivot[2024])]
+    res_df['Var % (25 vs 24)'] = [f"{v:+.2f}%" if v != 0 else "0.00%" for v in var_25_24]
 
-    if len(anios) >= 3:
-        a3 = anios[2]
-        meses_a3 = df_sub[df_sub['ANIO'] == a3]['MES_NUM'].unique()
-        
-        v_a2_periodo = df_sub[(df_sub['ANIO'] == a2) & (df_sub['MES_NUM'].isin(meses_a3))].groupby(col_group)['VENTA_NETA'].sum().reindex(pivot[col_group], fill_value=0).values
-        v_a3_periodo = df_sub[(df_sub['ANIO'] == a3) & (df_sub['MES_NUM'].isin(meses_a3))].groupby(col_group)['VENTA_NETA'].sum().reindex(pivot[col_group], fill_value=0).values
-        
-        res_df[f"{a2} ({a3})"] = [f"₡{x:,.2f}" for x in v_a2_periodo]
-        res_df[str(a3)] = [f"₡{x:,.2f}" for x in v_a3_periodo]
-        
-        vars_p = [calcular_variacion(act, ant) for act, ant in zip(v_a3_periodo, v_a2_periodo)]
-        res_df['IND '] = [f"{v:+.1f}%" if v != 0 else "0.0%" for v in vars_p]
+    res_df['2026'] = pivot[2026].apply(lambda x: f"{x:,.2f}")
+    
+    var_26_25 = [calcular_variacion(act, ant) for act, ant in zip(pivot[2026], pivot[2025])]
+    res_df['Var % (26 vs 25)'] = [f"{v:+.2f}%" if v != 0 else "0.00%" for v in var_26_25]
 
     totales = {titulo: 'TOTAL'}
-    totales[str(a1)] = f"₡{pivot[a1].sum():,.2f}"
-    totales[str(a2)] = f"₡{pivot[a2].sum():,.2f}"
-    totales['IND'] = f"{calcular_variacion(pivot[a2].sum(), pivot[a1].sum()):+.1f}%"
-
-    if len(anios) >= 3:
-        v2_tot = df_sub[(df_sub['ANIO'] == a2) & (df_sub['MES_NUM'].isin(meses_a3))]['VENTA_NETA'].sum()
-        v3_tot = df_sub[(df_sub['ANIO'] == a3) & (df_sub['MES_NUM'].isin(meses_a3))]['VENTA_NETA'].sum()
-        totales[f"{a2} ({a3})"] = f"₡{v2_tot:,.2f}"
-        totales[str(a3)] = f"₡{v3_tot:,.2f}"
-        totales['IND '] = f"{calcular_variacion(v3_tot, v2_tot):+.1f}%"
+    totales['2024'] = f"{pivot[2024].sum():,.2f}"
+    totales['2025'] = f"{pivot[2025].sum():,.2f}"
+    totales['Var % (25 vs 24)'] = f"{calcular_variacion(pivot[2025].sum(), pivot[2024].sum()):+.2f}%"
+    totales['2026'] = f"{pivot[2026].sum():,.2f}"
+    totales['Var % (26 vs 25)'] = f"{calcular_variacion(pivot[2026].sum(), pivot[2025].sum()):+.2f}%"
 
     df_tot = pd.DataFrame([totales])
     res_completo = pd.concat([res_df, df_tot], ignore_index=True)
 
-    cols_ind = [c for c in res_completo.columns if 'IND' in c]
+    cols_ind = [c for c in res_completo.columns if 'Var %' in c]
     styler = res_completo.style.map(resaltar_variaciones, subset=cols_ind)
     
     st.subheader(f"🏷️ {titulo}")
@@ -129,7 +117,7 @@ def generar_tabla_comparativa_formateada(df_sub: pd.DataFrame, col_group: str, t
     )
 
 # ---------------------------------------------------------
-# 4. Generador de PDF Completo (A4, Márgenes Estrechos, Símbolo ₡)
+# 4. Generador de PDF Completo (A4, 2024-2026 con Var % y sin símbolos)
 # ---------------------------------------------------------
 def construir_datos_tabla_pdf(df_sub, col_group, titulo_col):
     pivot = pd.pivot_table(
@@ -141,22 +129,31 @@ def construir_datos_tabla_pdf(df_sub, col_group, titulo_col):
         fill_value=0
     ).reset_index()
 
-    anios = sorted([col for col in pivot.columns if col != col_group])
-    if len(anios) < 2:
-        return None, None
+    anios_deseados = [2024, 2025, 2026]
+    for a in anios_deseados:
+        if a not in pivot.columns:
+            pivot[a] = 0.0
 
     res_df = pd.DataFrame()
     res_df[titulo_col] = pivot[col_group]
-    a1, a2 = anios[0], anios[1]
-    res_df[str(a1)] = pivot[a1].apply(lambda x: f"₡{x:,.2f}")
-    res_df[str(a2)] = pivot[a2].apply(lambda x: f"₡{x:,.2f}")
-    vars_a = [calcular_variacion(act, ant) for act, ant in zip(pivot[a2], pivot[a1])]
-    res_df['Var %'] = [f"{v:+.1f}%" for v in vars_a]
+    
+    res_df['2024'] = pivot[2024].apply(lambda x: f"{x:,.2f}")
+    res_df['2025'] = pivot[2025].apply(lambda x: f"{x:,.2f}")
+    
+    vars_25_24 = [calcular_variacion(act, ant) for act, ant in zip(pivot[2025], pivot[2024])]
+    res_df['Var 25/24'] = [f"{v:+.1f}%" for v in vars_25_24]
+    
+    res_df['2026'] = pivot[2026].apply(lambda x: f"{x:,.2f}")
+    
+    vars_26_25 = [calcular_variacion(act, ant) for act, ant in zip(pivot[2026], pivot[2025])]
+    res_df['Var 26/25'] = [f"{v:+.1f}%" for v in vars_26_25]
 
     totales = {titulo_col: 'TOTAL'}
-    totales[str(a1)] = f"₡{pivot[a1].sum():,.2f}"
-    totales[str(a2)] = f"₡{pivot[a2].sum():,.2f}"
-    totales['Var %'] = f"{calcular_variacion(pivot[a2].sum(), pivot[a1].sum()):+.1f}%"
+    totales['2024'] = f"{pivot[2024].sum():,.2f}"
+    totales['2025'] = f"{pivot[2025].sum():,.2f}"
+    totales['Var 25/24'] = f"{calcular_variacion(pivot[2025].sum(), pivot[2024].sum()):+.1f}%"
+    totales['2026'] = f"{pivot[2026].sum():,.2f}"
+    totales['Var 26/25'] = f"{calcular_variacion(pivot[2026].sum(), pivot[2025].sum()):+.1f}%"
 
     df_tot = pd.DataFrame([totales])
     res_completo = pd.concat([res_df, df_tot], ignore_index=True)
@@ -176,7 +173,7 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
     doc = SimpleDocTemplate(
         buffer, 
         pagesize=A4,
-        rightMargin=20, leftMargin=20, topMargin=20, bottomMargin=20
+        rightMargin=15, leftMargin=15, topMargin=20, bottomMargin=20
     )
     
     story = []
@@ -212,8 +209,9 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
 
     story.append(Spacer(1, 8))
 
-    # 1. Tabla Principal Mensual (Incluyendo 2026 completo y con símbolo ₡)
-    story.append(Paragraph("<b>Tabla Comparativa por Mes y Variación Porcentual</b>", style_subtitle))
+    # 1. Tabla Principal Mensual (2024, 2025, 2026 y sus variaciones sin símbolos de moneda)
+    story.append(Paragraph("<b>Tabla Comparativa por Mes y Variaciones (2024 - 2025 - 2026)</b>", style_subtitle))
+    
     pivot_base = pd.pivot_table(
         df_analisis,
         index=['MES_NUM', 'MES_NOMBRE'],
@@ -223,39 +221,47 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
         fill_value=0
     ).reset_index()
 
+    for a in [2024, 2025, 2026]:
+        if a not in pivot_base.columns:
+            pivot_base[a] = 0.0
+
     pivot_base = pivot_base.sort_values('MES_NUM').drop(columns=['MES_NUM'])
     pivot_base.rename(columns={'MES_NOMBRE': 'Mes'}, inplace=True)
-    anios_presentes = sorted([col for col in pivot_base.columns if col != 'Mes'])
 
-    if len(anios_presentes) >= 2:
-        fila_totales = {'Mes': 'TOTAL GENERAL'}
-        for anio in anios_presentes:
-            fila_totales[anio] = pivot_base[anio].sum()
+    fila_totales = {'Mes': 'TOTAL GENERAL', 2024: pivot_base[2024].sum(), 2025: pivot_base[2025].sum(), 2026: pivot_base[2026].sum()}
+    pivot_completa = pd.concat([pivot_base, pd.DataFrame([fila_totales])], ignore_index=True)
+
+    headers_pdf = ['Mes', '2024', '2025', 'Var % (25/24)', '2026', 'Var % (26/25)']
+    data_pdf = [headers_pdf]
+    
+    for _, row in pivot_completa.iterrows():
+        v25_24 = calcular_variacion(row[2025], row[2024])
+        v26_25 = calcular_variacion(row[2026], row[2025])
         
-        pivot_completa = pd.concat([pivot_base, pd.DataFrame([fila_totales])], ignore_index=True)
-        headers_pdf = ['Mes'] + [str(a) for a in anios_presentes]
-        data_pdf = [headers_pdf]
+        fila_vals = [
+            str(row['Mes']),
+            f"{row[2024]:,.2f}",
+            f"{row[2025]:,.2f}",
+            f"{v25_24:+.1f}%",
+            f"{row[2026]:,.2f}",
+            f"{v26_25:+.1f}%"
+        ]
+        data_pdf.append(fila_vals)
         
-        for _, row in pivot_completa.iterrows():
-            fila_vals = [str(row['Mes'])]
-            for anio in anios_presentes:
-                fila_vals.append(f"₡{row[anio]:,.2f}")
-            data_pdf.append(fila_vals)
-            
-        t = Table(data_pdf, colWidths=[65] + [90]*len(anios_presentes))
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#4a90e2")),
-            ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
-            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0,0), (-1,0), 7),
-            ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#e2efda")),
-            ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
-            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-            ('FONTSIZE', (0,1), (-1,-1), 7),
-        ]))
-        story.append(t)
-        story.append(Spacer(1, 8))
+    t = Table(data_pdf, colWidths=[65, 75, 75, 75, 75, 75])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#4a90e2")),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,0), 6.5),
+        ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#e2efda")),
+        ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+        ('FONTSIZE', (0,1), (-1,-1), 6.5),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 8))
 
     # 2. Gráfico en Imagen
     try:
@@ -267,22 +273,22 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
     except Exception:
         pass
 
-    # 3. Tablas Inferiores
+    # 3. Tablas Inferiores (Resumen Proveedores)
     story.append(Paragraph("<b>Comparativa por Proveedores y Categorías</b>", style_subtitle))
     
     data_res, headers_res = construir_datos_tabla_pdf(df_analisis, 'CLASIFICACION_1', f'Resumen ({seleccion_actual})')
     if data_res:
-        t_res = Table(data_res, colWidths=[160, 95, 95, 85])
+        t_res = Table(data_res, colWidths=[130, 70, 70, 65, 70, 65])
         t_res.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#4a90e2")),
             ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0,0), (-1,0), 7),
+            ('FONTSIZE', (0,0), (-1,0), 6.5),
             ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#e2efda")),
             ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
             ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-            ('FONTSIZE', (0,1), (-1,-1), 7),
+            ('FONTSIZE', (0,1), (-1,-1), 6.5),
         ]))
         story.append(t_res)
         story.append(Spacer(1, 6))
@@ -306,17 +312,17 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
             if not df_prov.empty:
                 data_prov, _ = construir_datos_tabla_pdf(df_prov, 'CLASIFICACION_2', f"Proveedor: {prov}")
                 if data_prov:
-                    t_p = Table(data_prov, colWidths=[160, 95, 95, 85])
+                    t_p = Table(data_prov, colWidths=[130, 70, 70, 65, 70, 65])
                     t_p.setStyle(TableStyle([
                         ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#5b9bd5")),
                         ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
                         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
                         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                        ('FONTSIZE', (0,0), (-1,0), 6.5),
+                        ('FONTSIZE', (0,0), (-1,0), 6),
                         ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#f2f2f2")),
                         ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
                         ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-                        ('FONTSIZE', (0,1), (-1,-1), 6.5),
+                        ('FONTSIZE', (0,1), (-1,-1), 6),
                     ]))
                     story.append(KeepTogether([Spacer(1, 4), t_p]))
 
@@ -372,10 +378,10 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
         color='ANIO_STR',
         markers=True,
         title=f"Evolución Mensual Comparativa ({seleccion_actual})",
-        labels={'MES_NOMBRE': 'Mes', 'VENTA_NETA': 'Venta Neta (₡)', 'ANIO_STR': 'Año'},
+        labels={'MES_NOMBRE': 'Mes', 'VENTA_NETA': 'Venta Neta', 'ANIO_STR': 'Año'},
         category_orders={'MES_NOMBRE': ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']}
     )
-    fig.update_traces(hovertemplate="<b>%{x}</b><br>Métrica: ₡%{y:,.2f}<extra></extra>")
+    fig.update_traces(hovertemplate="<b>%{x}</b><br>Métrica: %{y:,.2f}<extra></extra>")
     fig.update_layout(height=450, hovermode="x unified")
 
     with col_top_pdf:
@@ -418,9 +424,9 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
         st.subheader(f"🏪 Cliente: {df_analisis['ALIAS'].iloc[0]}")
         st.caption(f"**Razón Social:** {df_analisis['NOMBRE'].iloc[0]} | **Código:** {df_analisis['CLIENTE'].iloc[0]}")
     else:
-        st.subheader("📊 Tabla Comparativa por Mes y Variación Porcentual")
+        st.subheader("📊 Tabla Comparativa por Mes y Variaciones (2024 - 2025 - 2026)")
 
-    # --- CONSTRUCCIÓN DE LA TABLA PRINCIPAL (RESTAURO DE VARIACIONES + AÑO 2026) ---
+    # --- CONSTRUCCIÓN DE LA TABLA PRINCIPAL (2024, 2025, 2026 con sus Var %) ---
     pivot_base = pd.pivot_table(
         df_analisis,
         index=['MES_NUM', 'MES_NOMBRE'],
@@ -430,40 +436,30 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
         fill_value=0
     ).reset_index()
 
+    for a in [2024, 2025, 2026]:
+        if a not in pivot_base.columns:
+            pivot_base[a] = 0.0
+
     pivot_base = pivot_base.sort_values('MES_NUM').drop(columns=['MES_NUM'])
     pivot_base.rename(columns={'MES_NOMBRE': 'Mes'}, inplace=True)
 
-    anios_presentes = sorted([col for col in pivot_base.columns if col != 'Mes'])
-
-    fila_totales = {'Mes': 'TOTAL GENERAL'}
-    for anio in anios_presentes:
-        fila_totales[anio] = pivot_base[anio].sum()
-
+    fila_totales = {'Mes': 'TOTAL GENERAL', 2024: pivot_base[2024].sum(), 2025: pivot_base[2025].sum(), 2026: pivot_base[2026].sum()}
     pivot_completa = pd.concat([pivot_base, pd.DataFrame([fila_totales])], ignore_index=True)
 
     df_resultado = pd.DataFrame()
     df_resultado['Mes'] = pivot_completa['Mes']
+    df_resultado['2024'] = pivot_completa[2024].apply(lambda x: f"{x:,.2f}")
+    df_resultado['2025'] = pivot_completa[2025].apply(lambda x: f"{x:,.2f}")
 
-    if len(anios_presentes) > 0:
-        primer_anio = anios_presentes[0]
-        df_resultado[str(primer_anio)] = pivot_completa[primer_anio].apply(lambda x: f"₡{x:,.2f}")
+    var_25_24 = [calcular_variacion(act, ant) for act, ant in zip(pivot_completa[2025], pivot_completa[2024])]
+    df_resultado['Var % (25 vs 24)'] = [f"{v:+.2f}%" if v != 0 else "0.00%" for v in var_25_24]
 
-    columnas_variacion = []
-    for i in range(1, len(anios_presentes)):
-        anio_anterior = anios_presentes[i - 1]
-        anio_actual = anios_presentes[i]
+    df_resultado['2026'] = pivot_completa[2026].apply(lambda x: f"{x:,.2f}")
 
-        col_var_nombre = f"Var % ({str(anio_actual)[-2:]} vs {str(anio_anterior)[-2:]})"
-        columnas_variacion.append(col_var_nombre)
+    var_26_25 = [calcular_variacion(act, ant) for act, ant in zip(pivot_completa[2026], pivot_completa[2025])]
+    df_resultado['Var % (26 vs 25)'] = [f"{v:+.2f}%" if v != 0 else "0.00%" for v in var_26_25]
 
-        variaciones = [
-            calcular_variacion(actual, anterior)
-            for actual, anterior in zip(pivot_completa[anio_actual], pivot_completa[anio_anterior])
-        ]
-
-        df_resultado[str(anio_actual)] = pivot_completa[anio_actual].apply(lambda x: f"₡{x:,.2f}")
-        df_resultado[col_var_nombre] = [f"{v:+.2f}%" for v in variaciones]
-
+    columnas_variacion = ['Var % (25 vs 24)', 'Var % (26 vs 25)']
     styler = df_resultado.style.map(resaltar_variaciones, subset=columnas_variacion)
     
     st.dataframe(
@@ -511,7 +507,7 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
 with st.spinner("Cargando datos del reporte..."):
     df_raw = cargar_datos_exactus()
 
-# --- INICIALIZACIÓN SEGURA DE ESTADOS EN SESSION_STATE (INCLUYENDO 2026) ---
+# --- INICIALIZACIÓN SEGURA DE ESTADOS EN SESSION_STATE ---
 if "filtro_anios" not in st.session_state:
     st.session_state["filtro_anios"] = sorted(df_raw['ANIO'].unique(), reverse=True)
 
