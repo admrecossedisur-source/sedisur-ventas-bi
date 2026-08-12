@@ -124,9 +124,34 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
         st.warning("No hay datos disponibles con los filtros seleccionados.")
         return
 
-    # --- LISTA ORDENADA DE PROVEEDORES PARA NAVEGACIÓN ---
-    proveedores_disponibles = sorted(df['CLASIFICACION_1'].dropna().unique())
-    lista_vistas = ["📊 Consolidado General (Sedisur)"] + [f"Proveedor: {p}" for p in proveedores_disponibles]
+    # --- ORDEN PERSONALIZADO DE PROVEEDORES ---
+    orden_personalizado = [
+        'COLGATE_PALM',
+        'ESSITY',
+        'PEPSICO',
+        'HEINZ.CR',
+        'ALIMER S.A.',
+        'BAYER',
+        'RECKITT',
+        'BARRAZA',
+        'REYA CR.',
+        'HEALTH. RB.',
+        'GRUPO Q.',
+        'BEL PREMIUM',
+        'CODOMI',
+        'FARMANOVA',
+        'MUNDOREP',
+        'PRONUTRE'
+    ]
+
+    proveedores_disponibles_df = df['CLASIFICACION_1'].dropna().unique()
+    
+    # Ordenar según la lista estricta proporcionada, y agregar al final cualquier otro que surja
+    proveedores_ordenados = [p for p in orden_personalizado if p in proveedores_disponibles_df]
+    otros_proveedores = sorted([p for p in proveedores_disponibles_df if p not in orden_personalizado])
+    
+    lista_proveedores_final = proveedores_ordenados + otros_proveedores
+    lista_vistas = ["📊 Consolidado General (Sedisur)"] + [f"Proveedor: {p}" for p in lista_proveedores_final]
 
     if "indice_vista_prov" not in st.session_state:
         st.session_state["indice_vista_prov"] = 0
@@ -134,12 +159,17 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     if st.session_state["indice_vista_prov"] >= len(lista_vistas):
         st.session_state["indice_vista_prov"] = 0
 
-    # --- BARRA DE CONTROL CON BOTONES (ANTERIOR / SIGUIENTE) ---
-    col_info, col_btn_izq, col_btn_der = st.columns([6, 1, 1])
+    # --- BARRA DE CONTROL CON TRES BOTONES (ANTERIOR, SEDISUR, SIGUIENTE) ---
+    col_info, col_btn_izq, col_btn_sedisur, col_btn_der = st.columns([4, 1.2, 1.2, 1.2])
 
     with col_btn_izq:
         if st.button("◀ Anterior", use_container_width=True):
             st.session_state["indice_vista_prov"] = (st.session_state["indice_vista_prov"] - 1) % len(lista_vistas)
+            st.rerun()
+
+    with col_btn_sedisur:
+        if st.button("🏢 Sedisur", use_container_width=True):
+            st.session_state["indice_vista_prov"] = 0
             st.rerun()
 
     with col_btn_der:
@@ -268,7 +298,7 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     fig.update_layout(height=450, hovermode="x unified")
     st.plotly_chart(fig, use_container_width=True)
 
-    # --- RESTAURACIÓN DE LAS TABLAS INFERIORES POR PROVEEDOR Y CATEGORÍA ---
+    # --- RESTAURACIÓN DE LAS TABLAS INFERIORES ---
     st.divider()
     st.header("🏢 Comparativa por Proveedores y Categorías")
 
@@ -282,21 +312,12 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
         'REYA CR.', 'RECKITT'
     ]
 
-    orden_proveedores = [
-        'COLGATE_PALM',
-        'ESSITY',
-        'HEINZ.CR',
-        'ALIMER S.A.',
-        'PEPSICO',
-        'BARRAZA'
-    ]
-
     proveedores_disponibles_sub = df_analisis['CLASIFICACION_1'].dropna().unique()
-    proveedores_a_mostrar = [p for p in orden_proveedores if p in proveedores_disponibles_sub]
-    otros_proveedores = sorted([p for p in proveedores_disponibles_sub if p not in orden_proveedores])
-    proveedores_finales = proveedores_a_mostrar + otros_proveedores
+    proveedores_a_mostrar = [p for p in lista_proveedores_final if p in proveedores_disponibles_sub]
+    otros_proveedores_sub = sorted([p for p in proveedores_disponibles_sub if p not in lista_proveedores_final])
+    proveedores_finales_sub = proveedores_a_mostrar + otros_proveedores_sub
 
-    for prov in proveedores_finales:
+    for prov in proveedores_finales_sub:
         prov_limpio = prov.strip()
         if prov_limpio not in proveedores_excluidos:
             df_prov = df_analisis[df_analisis['CLASIFICACION_1'].str.strip() == prov_limpio]
