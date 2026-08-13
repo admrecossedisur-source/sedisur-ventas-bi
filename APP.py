@@ -36,11 +36,11 @@ def verificar_acceso():
     if st.session_state["autenticado"]:
         return True
 
-    col1, col2, col3 = st.columns([1, 2, 1])
+col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        # Mostramos el logo también en la pantalla de login de forma elegante
+        # Reemplazamos st.image con un ancho controlado usando el parámetro width
         try:
-            st.image("Sedisur_logo.png", use_container_width=True)
+            st.image("Sedisur_logo.png", width=250)
         except Exception:
             pass
             
