@@ -38,6 +38,12 @@ def verificar_acceso():
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
+        # Mostramos el logo también en la pantalla de login de forma elegante
+        try:
+            st.image("Sedisur_logo.png", use_container_width=True)
+        except Exception:
+            pass
+            
         st.markdown("## 🔐 Inicio de Sesión - Sedisur BI")
         st.markdown("Por favor, ingrese sus credenciales corporativas para acceder al sistema.")
 
@@ -60,11 +66,11 @@ def verificar_acceso():
     return False
 
 # ---------------------------------------------------------
-# 1. Configuración Inicial de la Página
+# 1. Configuración Inicial de la Página (Favicon e Icono)
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="Sedisur BI - Comparativa de Ventas",
-    page_icon="📈",
+    page_icon="Sedisur_logo.png",
     layout="wide"
 )
 
@@ -127,7 +133,6 @@ def generar_tabla_comparativa_formateada(df_sub: pd.DataFrame, col_group: str, t
     res_df = pd.DataFrame()
     res_df[titulo] = pivot[col_group]
 
-    # Manejo dinámico si hay 1 o más años presentes
     if len(anios) == 1:
         a1 = anios[0]
         res_df[str(a1)] = pivot[a1].apply(lambda x: f"₡{x:,.2f}")
@@ -487,7 +492,6 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     if REPORTLAB_DISPONIBLE:
         pdf_buffer_global = generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig)
 
-    # --- RESTAURACIÓN DE LAS TABLAS INFERIORES (PROVEEDORES Y SUB-MARCAS CON EXCLUSIONES) ---
     st.divider()
     st.header("🏢 Comparativa por Proveedores y Sub-Marcas")
 
@@ -589,7 +593,7 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
     st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
 
 # ---------------------------------------------------------
-# 6. Flujo Principal de Ejecución con Autenticación
+# 6. Flujo Principal de Ejecución con Autenticación y Logotipo
 # ---------------------------------------------------------
 if verificar_acceso():
     with st.spinner("Cargando datos del reporte..."):
@@ -599,6 +603,12 @@ if verificar_acceso():
         st.session_state["vista_activa"] = "comparativa"
 
     with st.sidebar:
+        # Inserción del logotipo oficial en la barra lateral
+        try:
+            st.image("Sedisur_logo.png", use_container_width=True)
+        except Exception:
+            st.markdown("### **Sedisur S.A.**")
+
         st.markdown(f"👤 **Usuario:** {st.session_state.get('usuario_actual', '')}")
         st.markdown(f"💼 **Cargo:** {st.session_state.get('cargo_actual', '')}")
         st.markdown(f"🛡️ **Rol:** {st.session_state.get('rol_actual', '')}")
