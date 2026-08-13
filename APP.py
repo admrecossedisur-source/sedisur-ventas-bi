@@ -121,49 +121,59 @@ def generar_tabla_comparativa_formateada(df_sub: pd.DataFrame, col_group: str, t
     ).reset_index()
 
     anios = sorted([col for col in pivot.columns if col != col_group])
-    if len(anios) < 2:
+    if len(anios) == 0:
         return
 
     res_df = pd.DataFrame()
     res_df[titulo] = pivot[col_group]
 
-    a1, a2 = anios[0], anios[1]
-    res_df[str(a1)] = pivot[a1].apply(lambda x: f"₡{x:,.2f}")
-    res_df[str(a2)] = pivot[a2].apply(lambda x: f"₡{x:,.2f}")
-    
-    vars_a = [calcular_variacion(act, ant) for act, ant in zip(pivot[a2], pivot[a1])]
-    res_df['IND'] = [f"{v:+.1f}%" if v != 0 else "0.0%" for v in vars_a]
+    # Manejo dinámico si hay 1 o más años presentes
+    if len(anios) == 1:
+        a1 = anios[0]
+        res_df[str(a1)] = pivot[a1].apply(lambda x: f"₡{x:,.2f}")
+        res_df['IND'] = "0.0%"
+    else:
+        a1, a2 = anios[0], anios[1]
+        res_df[str(a1)] = pivot[a1].apply(lambda x: f"₡{x:,.2f}")
+        res_df[str(a2)] = pivot[a2].apply(lambda x: f"₡{x:,.2f}")
+        
+        vars_a = [calcular_variacion(act, ant) for act, ant in zip(pivot[a2], pivot[a1])]
+        res_df['IND'] = [f"{v:+.1f}%" if v != 0 else "0.0%" for v in vars_a]
 
-    if len(anios) >= 3:
-        a3 = anios[2]
-        meses_a3 = df_sub[df_sub['ANIO'] == a3]['MES_NUM'].unique()
-        
-        v_a2_periodo = df_sub[(df_sub['ANIO'] == a2) & (df_sub['MES_NUM'].isin(meses_a3))].groupby(col_group)['VENTA_NETA'].sum().reindex(pivot[col_group], fill_value=0).values
-        v_a3_periodo = df_sub[(df_sub['ANIO'] == a3) & (df_sub['MES_NUM'].isin(meses_a3))].groupby(col_group)['VENTA_NETA'].sum().reindex(pivot[col_group], fill_value=0).values
-        
-        res_df[f"{a2} ({a3})"] = [f"₡{x:,.2f}" for x in v_a2_periodo]
-        res_df[str(a3)] = [f"₡{x:,.2f}" for x in v_a3_periodo]
-        
-        vars_p = [calcular_variacion(act, ant) for act, ant in zip(v_a3_periodo, v_a2_periodo)]
-        res_df['IND '] = [f"{v:+.1f}%" if v != 0 else "0.0%" for v in vars_p]
+        if len(anios) >= 3:
+            a3 = anios[2]
+            meses_a3 = df_sub[df_sub['ANIO'] == a3]['MES_NUM'].unique()
+            
+            v_a2_periodo = df_sub[(df_sub['ANIO'] == a2) & (df_sub['MES_NUM'].isin(meses_a3))].groupby(col_group)['VENTA_NETA'].sum().reindex(pivot[col_group], fill_value=0).values
+            v_a3_periodo = df_sub[(df_sub['ANIO'] == a3) & (df_sub['MES_NUM'].isin(meses_a3))].groupby(col_group)['VENTA_NETA'].sum().reindex(pivot[col_group], fill_value=0).values
+            
+            res_df[f"{a2} ({a3})"] = [f"₡{x:,.2f}" for x in v_a2_periodo]
+            res_df[str(a3)] = [f"₡{x:,.2f}" for x in v_a3_periodo]
+            
+            vars_p = [calcular_variacion(act, ant) for act, ant in zip(v_a3_periodo, v_a2_periodo)]
+            res_df['IND '] = [f"{v:+.1f}%" if v != 0 else "0.0%" for v in vars_p]
 
     totales = {titulo: 'TOTAL'}
-    totales[str(a1)] = f"₡{pivot[a1].sum():,.2f}"
-    totales[str(a2)] = f"₡{pivot[a2].sum():,.2f}"
-    totales['IND'] = f"{calcular_variacion(pivot[a2].sum(), pivot[a1].sum()):+.1f}%"
+    for anio in anios:
+        totales[str(anio)] = f"₡{pivot[anio].sum():,.2f}"
+    
+    if len(anios) >= 2:
+        totales['IND'] = f"{calcular_variacion(pivot[anios[1]].sum(), pivot[anios[0]].sum()):+.1f}%"
+    else:
+        totales['IND'] = "0.0%"
 
     if len(anios) >= 3:
-        v2_tot = df_sub[(df_sub['ANIO'] == a2) & (df_sub['MES_NUM'].isin(meses_a3))]['VENTA_NETA'].sum()
-        v3_tot = df_sub[(df_sub['ANIO'] == a3) & (df_sub['MES_NUM'].isin(meses_a3))]['VENTA_NETA'].sum()
-        totales[f"{a2} ({a3})"] = f"₡{v2_tot:,.2f}"
-        totales[str(a3)] = f"₡{v3_tot:,.2f}"
+        v2_tot = df_sub[(df_sub['ANIO'] == anios[1]) & (df_sub['MES_NUM'].isin(df_sub[df_sub['ANIO'] == anios[2]]['MES_NUM'].unique()))]['VENTA_NETA'].sum()
+        v3_tot = df_sub[(df_sub['ANIO'] == anios[2]) & (df_sub['MES_NUM'].isin(df_sub[df_sub['ANIO'] == anios[2]]['MES_NUM'].unique()))]['VENTA_NETA'].sum()
+        totales[f"{anios[1]} ({anios[2]})"] = f"₡{v2_tot:,.2f}"
+        totales[str(anios[2])] = f"₡{v3_tot:,.2f}"
         totales['IND '] = f"{calcular_variacion(v3_tot, v2_tot):+.1f}%"
 
     df_tot = pd.DataFrame([totales])
     res_completo = pd.concat([res_df, df_tot], ignore_index=True)
 
     cols_ind = [c for c in res_completo.columns if 'IND' in c]
-    styler = res_completo.style.map(resaltar_variaciones, subset=cols_ind)
+    styler = res_completo.style.map(resaltar_variaciones, subset=cols_ind) if cols_ind else res_completo
     
     st.subheader(f"🏷️ {titulo}")
     st.dataframe(
@@ -421,7 +431,7 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
         df_resultado[str(anio_actual)] = pivot_completa[anio_actual].apply(lambda x: f"₡{x:,.2f}")
         df_resultado[col_var_nombre] = [f"{v:+.2f}%" for v in variaciones]
 
-    styler = df_resultado.style.map(resaltar_variaciones, subset=columnas_variacion)
+    styler = df_resultado.style.map(resaltar_variaciones, subset=columnas_variacion) if columnas_variacion else df_resultado
     
     st.dataframe(
         styler, 
