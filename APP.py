@@ -560,7 +560,75 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     return pdf_buffer_global
 
 # ---------------------------------------------------------
-# 5. Flujo Principal de Ejecución con Autenticación
+# 6. Nueva Función: Vista Cobertura 8020 (Doble Filtro y Checks)
+# ---------------------------------------------------------
+def mostrar_vista_cobertura_8020(df: pd.DataFrame):
+    st.header("🎯 Análisis de Cobertura 80/20 y Oportunidades de Alcance")
+    st.markdown("Selecciona el **Filtro A (Referencia 80/20)** y opcionalmente el **Filtro B (Comparativo)** para evaluar la cobertura y brechas de los clientes.")
+
+    if df.empty:
+        st.warning("No hay datos disponibles con los filtros seleccionados.")
+        return
+
+    col_f1, col_f2 = st.columns(2)
+    marcas_disponibles = sorted(df['CLASIFICACION_1'].dropna().unique())
+
+    with col_f1:
+        filtro_a = st.selectbox("📌 Filtro A (Referencia Principal 80/20)", options=["-- Seleccione --"] + list(marcas_disponibles))
+
+    with col_f2:
+        filtro_b = st.selectbox("🔍 Filtro B (Opcional para Comparar Colocación)", options=["-- Ninguno --"] + list(marcas_disponibles))
+
+    if filtro_a == "-- Seleccione --":
+        st.info("👆 Por favor, seleccione un proveedor en el **Filtro A** para calcular el Pareto y mostrar la tabla de clientes.")
+        return
+
+    # Filtrar el dataframe base para la referencia A
+    df_ref_a = df[df['CLASIFICACION_1'] == filtro_a]
+
+    # Agrupar por cliente para calcular la venta total y el promedio
+    df_clientes = df_ref_a.groupby(['CLIENTE', 'ALIAS', 'CATEGORIA_CLIENTE'], as_index=False).agg(
+        VENTA_TOTAL_A=('VENTA_NETA', 'sum'),
+        VENTA_PROMEDIO_A=('VENTA_NETA', 'mean')
+    ).sort_values(by='VENTA_TOTAL_A', ascending=False)
+
+    if df_clientes.empty:
+        st.warning(f"No se encontraron registros de venta para el proveedor {filtro_a} en el período seleccionado.")
+        return
+
+    # Calcular Pareto 80/20 acumulado
+    venta_total_acumulada = df_clientes['VENTA_TOTAL_A'].sum()
+    df_clientes['PORCENTAJE_INDIVIDUAL'] = (df_clientes['VENTA_TOTAL_A'] / venta_total_acumulada) * 100
+    df_clientes['PORCENTAJE_ACUMULADO'] = df_clientes['PORCENTAJE_INDIVIDUAL'].cumsum()
+
+    # Definir clase A (el 80%) o filtrar según sea necesario
+    # Construir tabla visual final
+    df_tabla_final = pd.DataFrame()
+    df_tabla_final['Cliente'] = df_clientes['CLIENTE']
+    df_tabla_final['Alias'] = df_clientes['ALIAS']
+    df_tabla_final['Categoría Cliente'] = df_clientes['CATEGORIA_CLIENTE']
+    df_tabla_final['Venta Promedio (Filtro A)'] = df_clientes['VENTA_PROMEDIO_A'].apply(lambda x: f"${x:,.2f}")
+    df_tabla_final['Cobertura Filtro A'] = "✅"
+
+    # Si se seleccionó un Filtro B válido, calculamos la segunda columna de cobertura
+    if filtro_b != "-- Ninguno --":
+        df_ref_b = df[df['CLASIFICACION_1'] == filtro_b]
+        df_clientes_b = df_ref_b.groupby('CLIENTE', as_index=False).agg(
+            VENTA_TOTAL_B=('VENTA_NETA', 'sum')
+        )
+        
+        # Unir para verificar si tiene compra en el filtro B
+        df_tabla_final = df_tabla_final.merge(df_clientes_b, on='Cliente', how='left')
+        df_tabla_final['VENTA_TOTAL_B'] = df_tabla_final['VENTA_TOTAL_B'].fillna(0)
+        df_tabla_final[f'Cobertura Filtro B'] = df_tabla_final['VENTA_TOTAL_B'].apply(lambda x: "✅" if x > 0 else "❌")
+        df_tabla_final = df_tabla_final.drop(columns=['VENTA_TOTAL_B'])
+
+    st.subheader(f"📊 Matriz de Cobertura para: {filtro_a}" + (f" vs {filtro_b}" if filtro_b != "-- Ninguno --" else ""))
+    st.dataframe(df_tabla_final, use_container_width=True, hide_index=True)
+
+
+# ---------------------------------------------------------
+# 7. Flujo Principal de Ejecución con Autenticación
 # ---------------------------------------------------------
 if verificar_acceso():
     with st.spinner("Cargando datos del reporte..."):
@@ -587,6 +655,9 @@ if verificar_acceso():
     if "filtro_vendedores" not in st.session_state:
         st.session_state["filtro_vendedores"] = []
 
+    if "vista_activa" not in st.session_state:
+        st.session_state["vista_activa"] = "comparativa"
+
     # --- PANEL DE FILTROS Y BARRA LATERAL DE USUARIO ---
     with st.sidebar:
         st.markdown(f"👤 **Usuario:** {st.session_state.get('usuario_actual', '')}")
@@ -595,6 +666,17 @@ if verificar_acceso():
         if st.button("Cerrar Sesión", use_container_width=True):
             st.session_state["autenticado"] = False
             st.rerun()
+        st.divider()
+
+        st.markdown("### 🧭 Menú Principal")
+        if st.button("📈 Comparativa de ventas", use_container_width=True):
+            st.session_state["vista_activa"] = "comparativa"
+            st.rerun()
+
+        if st.button("🎯 Cobertura 8020", use_container_width=True):
+            st.session_state["vista_activa"] = "cobertura"
+            st.rerun()
+
         st.divider()
 
     with st.expander("🔍 **Panel de Filtros Comerciales**", expanded=True):
@@ -628,7 +710,7 @@ if verificar_acceso():
             sel_anios = st.multiselect("Año", anios_disponibles, key="filtro_anios")
             
             meses_disponibles = [m for m in ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
-                                            'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'] if m in df_raw['MES_NOMBRE'].unique()]
+                                             'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'] if m in df_raw['MES_NOMBRE'].unique()]
             sel_meses = st.multiselect("Mes", meses_disponibles, key="filtro_meses")
 
         with col2:
@@ -660,15 +742,19 @@ if verificar_acceso():
     if sel_vendedores:
         df_filt = df_filt[df_filt['VENDEDOR'].isin(sel_vendedores)]
 
-    pdf_buffer_generado = mostrar_vista_comparativa(df_filt)
+    # --- ENRUTADOR DE VISTAS ---
+    if st.session_state["vista_activa"] == "comparativa":
+        pdf_buffer_generado = mostrar_vista_comparativa(df_filt)
 
-    with col_btn_desc:
-        if REPORTLAB_DISPONIBLE and pdf_buffer_generado:
-            st.download_button(
-                label="📥 Descargar PDF",
-                data=pdf_buffer_generado,
-                file_name="Informe_Sedisur_Ejecutivo.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-                help="Descargar informe PDF completo con tablas y gráficos"
-            )
+        with col_btn_desc:
+            if REPORTLAB_DISPONIBLE and pdf_buffer_generado:
+                st.download_button(
+                    label="📥 Descargar PDF",
+                    data=pdf_buffer_generado,
+                    file_name="Informe_Sedisur_Ejecutivo.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    help="Descargar informe PDF completo con tablas y gráficos"
+                )
+    elif st.session_state["vista_activa"] == "cobertura":
+        mostrar_vista_cobertura_8020(df_filt)
