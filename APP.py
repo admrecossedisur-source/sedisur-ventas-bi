@@ -425,9 +425,14 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     st.subheader("📉 Tendencia Evolutiva Mensual")
     st.plotly_chart(fig, use_container_width=True)
 
+    # ---------------------------------------------------------
+    # RESTAURACIÓN DE LAS TABLAS COMPARATIVAS POR PROVEEDORES Y CATEGORÍAS
+    # ---------------------------------------------------------
     st.divider()
     st.header("🏢 Comparativa por Proveedores y Categorías")
-    generar_tabla_comparativa_formateada(df_analisis, 'CLASIFICACION_1', f'Resumen ({seleccion_actual})')
+    
+    generar_tabla_comparativa_formateada(df_analisis, 'CLASIFICACION_1', f'Resumen por Proveedor ({seleccion_actual})')
+    generar_tabla_comparativa_formateada(df_analisis, 'CATEGORIA_CLIENTE', f'Resumen por Categoría de Cliente ({seleccion_actual})')
 
     return pdf_buffer_global
 
