@@ -601,10 +601,9 @@ def mostrar_vista_cobertura_8020(df: pd.DataFrame):
     df_clientes['PORCENTAJE_INDIVIDUAL'] = (df_clientes['VENTA_TOTAL_A'] / venta_total_acumulada) * 100
     df_clientes['PORCENTAJE_ACUMULADO'] = df_clientes['PORCENTAJE_INDIVIDUAL'].cumsum()
 
-    # Definir clase A (el 80%) o filtrar según sea necesario
-    # Construir tabla visual final
+    # Construir tabla visual final asegurando el nombre de la columna clave en mayúsculas
     df_tabla_final = pd.DataFrame()
-    df_tabla_final['Cliente'] = df_clientes['CLIENTE']
+    df_tabla_final['CLIENTE'] = df_clientes['CLIENTE']
     df_tabla_final['Alias'] = df_clientes['ALIAS']
     df_tabla_final['Categoría Cliente'] = df_clientes['CATEGORIA_CLIENTE']
     df_tabla_final['Venta Promedio (Filtro A)'] = df_clientes['VENTA_PROMEDIO_A'].apply(lambda x: f"${x:,.2f}")
@@ -617,14 +616,17 @@ def mostrar_vista_cobertura_8020(df: pd.DataFrame):
             VENTA_TOTAL_B=('VENTA_NETA', 'sum')
         )
         
-        # Unir para verificar si tiene compra en el filtro B
-        df_tabla_final = df_tabla_final.merge(df_clientes_b, on='Cliente', how='left')
+        # Unir usando la columna 'CLIENTE' estandarizada
+        df_tabla_final = df_tabla_final.merge(df_clientes_b, on='CLIENTE', how='left')
         df_tabla_final['VENTA_TOTAL_B'] = df_tabla_final['VENTA_TOTAL_B'].fillna(0)
-        df_tabla_final[f'Cobertura Filtro B'] = df_tabla_final['VENTA_TOTAL_B'].apply(lambda x: "✅" if x > 0 else "❌")
+        df_tabla_final['Cobertura Filtro B'] = df_tabla_final['VENTA_TOTAL_B'].apply(lambda x: "✅" if x > 0 else "❌")
         df_tabla_final = df_tabla_final.drop(columns=['VENTA_TOTAL_B'])
 
+    # Ocultar la columna técnica de código y renombrar para la vista limpia si es necesario
+    df_mostrar = df_tabla_final.drop(columns=['CLIENTE'])
+
     st.subheader(f"📊 Matriz de Cobertura para: {filtro_a}" + (f" vs {filtro_b}" if filtro_b != "-- Ninguno --" else ""))
-    st.dataframe(df_tabla_final, use_container_width=True, hide_index=True)
+    st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
 
 
 # ---------------------------------------------------------
