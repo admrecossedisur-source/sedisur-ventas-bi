@@ -2,18 +2,80 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 from datetime import datetime
+import io
+
+# Intentar importar ReportLab para la generación del PDF con soporte de gráficos
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage, KeepTogether
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib import colors
+    REPORTLAB_DISPONIBLE = True
+except ImportError:
+    REPORTLAB_DISPONIBLE = False
 
 # ---------------------------------------------------------
-# 1. Configuración Inicial de la Página
+# 0. Sistema de Autenticación de Usuarios
+# ---------------------------------------------------------
+USUARIOS_PERMITIDOS = {
+    "kenneth.martinez@sedisur.com": {"password": "Kem000", "cargo": "Gerencia", "rol": "Usuario"},
+    "custodio.arias@sedisur.com": {"password": "Cua000", "cargo": "Gerencia", "rol": "Usuario"},
+    "henry.azofeifa@sedisur.com": {"password": "Hea000", "cargo": "Gerencia", "rol": "Usuario"},
+    "diego.barrantes@sedisur.com": {"password": "Dib000", "cargo": "Supervisión", "rol": "Usuario"},
+    "harvy.arbustini@sedisur.com": {"password": "Haa000", "cargo": "Supervisión", "rol": "Usuario"},
+    "eddy.zuniga@sedisur.com": {"password": "Edz000", "cargo": "Supervisión", "rol": "Usuario"},
+    "cristina.nunez@sedisur.com": {"password": "Crn000", "cargo": "Supervisión", "rol": "administrador"},
+    "erick.abarca@sedisur.com": {"password": "Era000", "cargo": "Supervisión", "rol": "Usuario"},
+    "rafael.romero@sedisur.com": {"password": "Rar000", "cargo": "Supervisión", "rol": "administrador"}
+}
+
+def verificar_acceso():
+    if "autenticado" not in st.session_state:
+        st.session_state["autenticado"] = False
+
+    if st.session_state["autenticado"]:
+        return True
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        # Mostramos el logo también en la pantalla de login de forma elegante
+        try:
+            st.image("Sedisur_logo.png", use_container_width=True)
+        except Exception:
+            pass
+            
+        st.markdown("## 🔐 Inicio de Sesión - Sedisur BI")
+        st.markdown("Por favor, ingrese sus credenciales corporativas para acceder al sistema.")
+
+        with st.form("form_login"):
+            correo = st.text_input("Correo electrónico").strip().lower()
+            password = st.text_input("Contraseña", type="password")
+            submit = st.form_submit_button("Ingresar", use_container_width=True)
+
+            if submit:
+                if correo in USUARIOS_PERMITIDOS and USUARIOS_PERMITIDOS[correo]["password"] == password:
+                    st.session_state["autenticado"] = True
+                    st.session_state["usuario_actual"] = correo
+                    st.session_state["cargo_actual"] = USUARIOS_PERMITIDOS[correo]["cargo"]
+                    st.session_state["rol_actual"] = USUARIOS_PERMITIDOS[correo]["rol"]
+                    st.success("¡Acceso concedido!")
+                    st.rerun()
+                else:
+                    st.error("Correo o contraseña incorrectos.")
+    
+    return False
+
+# ---------------------------------------------------------
+# 1. Configuración Inicial de la Página (Favicon e Icono)
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="Sedisur BI - Comparativa de Ventas",
-    page_icon="📈",
+    page_icon="Sedisur_logo.png",
     layout="wide"
 )
 
 # ---------------------------------------------------------
-# 2. Carga de Datos Segura (Desde el archivo local/nube)
+# 2. Carga de Datos Segura
 # ---------------------------------------------------------
 @st.cache_data
 def cargar_datos_exactus():
@@ -27,7 +89,7 @@ def cargar_datos_exactus():
         9: 'Septiembre', 10: 'Octubre', 11: 'Noviembre', 12: 'Diciembre'
     }
     df['MES_NOMBRE'] = df['MES_NUM'].map(meses_es)
-    df['CLIENTE_DISPLAY'] = df['CLIENTE'] + " - " + df['ALIAS']
+    df['CLIENTE_DISPLAY'] = df['CLIENTE'].astype(str) + " - " + df['ALIAS'].astype(str)
     
     return df
 
@@ -65,49 +127,58 @@ def generar_tabla_comparativa_formateada(df_sub: pd.DataFrame, col_group: str, t
     ).reset_index()
 
     anios = sorted([col for col in pivot.columns if col != col_group])
-    if len(anios) < 2:
+    if len(anios) == 0:
         return
 
     res_df = pd.DataFrame()
     res_df[titulo] = pivot[col_group]
 
-    a1, a2 = anios[0], anios[1]
-    res_df[str(a1)] = pivot[a1].apply(lambda x: f"₡{x:,.2f}")
-    res_df[str(a2)] = pivot[a2].apply(lambda x: f"₡{x:,.2f}")
-    
-    vars_a = [calcular_variacion(act, ant) for act, ant in zip(pivot[a2], pivot[a1])]
-    res_df['IND'] = [f"{v:+.1f}%" if v != 0 else "0.0%" for v in vars_a]
+    if len(anios) == 1:
+        a1 = anios[0]
+        res_df[str(a1)] = pivot[a1].apply(lambda x: f"₡{x:,.2f}")
+        res_df['IND'] = "0.0%"
+    else:
+        a1, a2 = anios[0], anios[1]
+        res_df[str(a1)] = pivot[a1].apply(lambda x: f"₡{x:,.2f}")
+        res_df[str(a2)] = pivot[a2].apply(lambda x: f"₡{x:,.2f}")
+        
+        vars_a = [calcular_variacion(act, ant) for act, ant in zip(pivot[a2], pivot[a1])]
+        res_df['IND'] = [f"{v:+.1f}%" if v != 0 else "0.0%" for v in vars_a]
 
-    if len(anios) >= 3:
-        a3 = anios[2]
-        meses_a3 = df_sub[df_sub['ANIO'] == a3]['MES_NUM'].unique()
-        
-        v_a2_periodo = df_sub[(df_sub['ANIO'] == a2) & (df_sub['MES_NUM'].isin(meses_a3))].groupby(col_group)['VENTA_NETA'].sum().reindex(pivot[col_group], fill_value=0).values
-        v_a3_periodo = df_sub[(df_sub['ANIO'] == a3) & (df_sub['MES_NUM'].isin(meses_a3))].groupby(col_group)['VENTA_NETA'].sum().reindex(pivot[col_group], fill_value=0).values
-        
-        res_df[f"{a2} ({a3})"] = [f"₡{x:,.2f}" for x in v_a2_periodo]
-        res_df[str(a3)] = [f"₡{x:,.2f}" for x in v_a3_periodo]
-        
-        vars_p = [calcular_variacion(act, ant) for act, ant in zip(v_a3_periodo, v_a2_periodo)]
-        res_df['IND '] = [f"{v:+.1f}%" if v != 0 else "0.0%" for v in vars_p]
+        if len(anios) >= 3:
+            a3 = anios[2]
+            meses_a3 = df_sub[df_sub['ANIO'] == a3]['MES_NUM'].unique()
+            
+            v_a2_periodo = df_sub[(df_sub['ANIO'] == a2) & (df_sub['MES_NUM'].isin(meses_a3))].groupby(col_group)['VENTA_NETA'].sum().reindex(pivot[col_group], fill_value=0).values
+            v_a3_periodo = df_sub[(df_sub['ANIO'] == a3) & (df_sub['MES_NUM'].isin(meses_a3))].groupby(col_group)['VENTA_NETA'].sum().reindex(pivot[col_group], fill_value=0).values
+            
+            res_df[f"{a2} ({a3})"] = [f"₡{x:,.2f}" for x in v_a2_periodo]
+            res_df[str(a3)] = [f"₡{x:,.2f}" for x in v_a3_periodo]
+            
+            vars_p = [calcular_variacion(act, ant) for act, ant in zip(v_a3_periodo, v_a2_periodo)]
+            res_df['IND '] = [f"{v:+.1f}%" if v != 0 else "0.0%" for v in vars_p]
 
     totales = {titulo: 'TOTAL'}
-    totales[str(a1)] = f"₡{pivot[a1].sum():,.2f}"
-    totales[str(a2)] = f"₡{pivot[a2].sum():,.2f}"
-    totales['IND'] = f"{calcular_variacion(pivot[a2].sum(), pivot[a1].sum()):+.1f}%"
+    for anio in anios:
+        totales[str(anio)] = f"₡{pivot[anio].sum():,.2f}"
+    
+    if len(anios) >= 2:
+        totales['IND'] = f"{calcular_variacion(pivot[anios[1]].sum(), pivot[anios[0]].sum()):+.1f}%"
+    else:
+        totales['IND'] = "0.0%"
 
     if len(anios) >= 3:
-        v2_tot = df_sub[(df_sub['ANIO'] == a2) & (df_sub['MES_NUM'].isin(meses_a3))]['VENTA_NETA'].sum()
-        v3_tot = df_sub[(df_sub['ANIO'] == a3) & (df_sub['MES_NUM'].isin(meses_a3))]['VENTA_NETA'].sum()
-        totales[f"{a2} ({a3})"] = f"₡{v2_tot:,.2f}"
-        totales[str(a3)] = f"₡{v3_tot:,.2f}"
+        v2_tot = df_sub[(df_sub['ANIO'] == anios[1]) & (df_sub['MES_NUM'].isin(df_sub[df_sub['ANIO'] == anios[2]]['MES_NUM'].unique()))]['VENTA_NETA'].sum()
+        v3_tot = df_sub[(df_sub['ANIO'] == anios[2]) & (df_sub['MES_NUM'].isin(df_sub[df_sub['ANIO'] == anios[2]]['MES_NUM'].unique()))]['VENTA_NETA'].sum()
+        totales[f"{anios[1]} ({anios[2]})"] = f"₡{v2_tot:,.2f}"
+        totales[str(anios[2])] = f"₡{v3_tot:,.2f}"
         totales['IND '] = f"{calcular_variacion(v3_tot, v2_tot):+.1f}%"
 
     df_tot = pd.DataFrame([totales])
     res_completo = pd.concat([res_df, df_tot], ignore_index=True)
 
     cols_ind = [c for c in res_completo.columns if 'IND' in c]
-    styler = res_completo.style.map(resaltar_variaciones, subset=cols_ind)
+    styler = res_completo.style.map(resaltar_variaciones, subset=cols_ind) if cols_ind else res_completo
     
     st.subheader(f"🏷️ {titulo}")
     st.dataframe(
@@ -117,6 +188,145 @@ def generar_tabla_comparativa_formateada(df_sub: pd.DataFrame, col_group: str, t
         height=(len(res_completo) + 1) * 35 + 5
     )
 
+# ---------------------------------------------------------
+# 4. Generador de PDF Completo
+# ---------------------------------------------------------
+def construir_datos_tabla_mensual_pdf(df_filtrado):
+    pivot_base = pd.pivot_table(
+        df_filtrado,
+        index=['MES_NUM', 'MES_NOMBRE'],
+        columns='ANIO',
+        values='VENTA_NETA',
+        aggfunc='sum',
+        fill_value=0
+    ).reset_index()
+
+    for a in [2024, 2025, 2026]:
+        if a not in pivot_base.columns:
+            pivot_base[a] = 0.0
+
+    pivot_base = pivot_base.sort_values('MES_NUM').drop(columns=['MES_NUM'])
+    pivot_base.rename(columns={'MES_NOMBRE': 'Mes'}, inplace=True)
+
+    fila_totales = {'Mes': 'TOTAL GENERAL', 2024: pivot_base[2024].sum(), 2025: pivot_base[2025].sum(), 2026: pivot_base[2026].sum()}
+    pivot_completa = pd.concat([pivot_base, pd.DataFrame([fila_totales])], ignore_index=True)
+
+    headers_pdf = ['Mes', '2024', '2025', 'Var % (25/24)', '2026', 'Var % (26/25)']
+    data_pdf = [headers_pdf]
+    
+    for _, row in pivot_completa.iterrows():
+        v25_24 = calcular_variacion(row[2025], row[2024])
+        v26_25 = calcular_variacion(row[2026], row[2025])
+        
+        fila_vals = [
+            str(row['Mes']),
+            f"{row[2024]:,.2f}",
+            f"{row[2025]:,.2f}",
+            f"{v25_24:+.1f}%",
+            f"{row[2026]:,.2f}",
+            f"{v26_25:+.1f}%"
+        ]
+        data_pdf.append(fila_vals)
+        
+    return data_pdf
+
+def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
+    if not REPORTLAB_DISPONIBLE:
+        return None
+    
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, 
+        pagesize=A4,
+        rightMargin=15, leftMargin=15, topMargin=20, bottomMargin=20
+    )
+    
+    story = []
+    styles = getSampleStyleSheet()
+    
+    style_title = ParagraphStyle(
+        'TitleStyle',
+        parent=styles['Heading1'],
+        fontSize=13,
+        textColor=colors.HexColor("#2f5597"),
+        spaceAfter=4
+    )
+    style_subtitle = ParagraphStyle(
+        'SubTitleStyle',
+        parent=styles['Heading2'],
+        fontSize=10,
+        textColor=colors.HexColor("#333333"),
+        spaceAfter=4,
+        spaceBefore=6,
+        keepWithNext=True
+    )
+
+    story.append(Paragraph(f"<b>Informe Ejecutivo Sedisur BI - {seleccion_actual}</b>", style_title))
+    story.append(Paragraph(f"Generado el: {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles['Normal']))
+    
+    clientes_unicos = df_analisis['CLIENTE'].unique()
+    if len(clientes_unicos) == 1:
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(f"<b>Cliente:</b> {df_analisis['ALIAS'].iloc[0]} | <b>Razón Social:</b> {df_analisis['NOMBRE'].iloc[0]} | <b>Código:</b> {df_analisis['CLIENTE'].iloc[0]}", styles['Normal']))
+
+    vendedores_unicos = df_analisis['VENDEDOR'].unique()
+    if len(vendedores_unicos) == 1 and pd.notna(vendedores_unicos[0]):
+        story.append(Paragraph(f"<b>Vendedor:</b> {vendedores_unicos[0]}", styles['Normal']))
+
+    story.append(Spacer(1, 8))
+
+    proveedores_principales = ['COLGATE_PALM', 'ESSITY', 'HEINZ.CR', 'ALIMER S.A.', 'PEPSICO']
+
+    titulo_gen = Paragraph("<b>Tabla Comparativa por Mes y Variaciones (2024 - 2025 - 2026) - Consolidado General</b>", style_subtitle)
+    data_gen = construir_datos_tabla_mensual_pdf(df_analisis)
+    t_gen = Table(data_gen, colWidths=[65, 75, 75, 75, 75, 75])
+    t_gen.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#4a90e2")),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,0), 6.5),
+        ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#e2efda")),
+        ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+        ('FONTSIZE', (0,1), (-1,-1), 6.5),
+    ]))
+    story.append(KeepTogether([titulo_gen, t_gen]))
+    story.append(Spacer(1, 8))
+
+    for prov_esp in proveedores_principales:
+        df_prov_esp = df_analisis[df_analisis['CLASIFICACION_1'].str.strip() == prov_esp]
+        if not df_prov_esp.empty:
+            titulo_esp = Paragraph(f"<b>Tabla Comparativa por Mes y Variaciones (2024 - 2025 - 2026) - Proveedor: {prov_esp}</b>", style_subtitle)
+            data_esp = construir_datos_tabla_mensual_pdf(df_prov_esp)
+            t_esp = Table(data_esp, colWidths=[65, 75, 75, 75, 75, 75])
+            t_esp.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#5b9bd5")),
+                ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0,0), (-1,0), 6.5),
+                ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#f2f2f2")),
+                ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+                ('FONTSIZE', (0,1), (-1,-1), 6.5),
+            ]))
+            story.append(KeepTogether([titulo_esp, t_esp]))
+            story.append(Spacer(1, 8))
+
+    try:
+        img_bytes = fig_plotly.to_image(format="png", width=650, height=240, scale=2)
+        img_io = io.BytesIO(img_bytes)
+        titulo_img = Paragraph("<b>Tendencia Evolutiva Mensual</b>", style_subtitle)
+        story.append(KeepTogether([titulo_img, RLImage(img_io, width=420, height=155)]))
+        story.append(Spacer(1, 8))
+    except Exception:
+        pass
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
 def mostrar_vista_comparativa(df: pd.DataFrame):
     st.header("📈 Comparativa de Ventas Año contra Año")
 
@@ -124,15 +334,64 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
         st.warning("No hay datos disponibles con los filtros seleccionados.")
         return
 
-    clientes_unicos = df['CLIENTE'].unique()
+    orden_personalizado = [
+        'COLGATE_PALM', 'ESSITY', 'PEPSICO', 'HEINZ.CR', 'ALIMER S.A.',
+        'BAYER', 'RECKITT', 'BARRAZA', 'REYA CR.', 'HEALTH. RB.',
+        'GRUPO Q.', 'BEL PREMIUM', 'CODOMI', 'FARMANOVA', 'MUNDOREP', 'PRONUTRE'
+    ]
+
+    proveedores_disponibles_df = df['CLASIFICACION_1'].dropna().unique()
+    proveedores_ordenados = [p for p in orden_personalizado if p in proveedores_disponibles_df]
+    otros_proveedores = sorted([p for p in proveedores_disponibles_df if p not in orden_personalizado])
+    
+    lista_proveedores_final = proveedores_ordenados + otros_proveedores
+    lista_vistas = ["📊 Consolidado General (Sedisur)"] + [f"Proveedor: {p}" for p in lista_proveedores_final]
+
+    if "indice_vista_prov" not in st.session_state:
+        st.session_state["indice_vista_prov"] = 0
+
+    if st.session_state["indice_vista_prov"] >= len(lista_vistas):
+        st.session_state["indice_vista_prov"] = 0
+
+    col_info, col_btn_izq, col_btn_sedisur, col_btn_der = st.columns([4, 1.2, 1.2, 1.2])
+
+    with col_btn_izq:
+        if st.button("◀ Anterior", use_container_width=True):
+            st.session_state["indice_vista_prov"] = (st.session_state["indice_vista_prov"] - 1) % len(lista_vistas)
+            st.rerun()
+
+    with col_btn_sedisur:
+        if st.button("🏢 Sedisur", use_container_width=True):
+            st.session_state["indice_vista_prov"] = 0
+            st.rerun()
+
+    with col_btn_der:
+        if st.button("Siguiente ▶", use_container_width=True):
+            st.session_state["indice_vista_prov"] = (st.session_state["indice_vista_prov"] + 1) % len(lista_vistas)
+            st.rerun()
+
+    seleccion_actual = lista_vistas[st.session_state["indice_vista_prov"]]
+
+    with col_info:
+        st.markdown(f"### 🏷️ Analizando: **{seleccion_actual}**")
+
+    st.divider()
+
+    if seleccion_actual != "📊 Consolidado General (Sedisur)":
+        proveedor_seleccionado = seleccion_actual.replace("Proveedor: ", "").strip()
+        df_analisis = df[df['CLASIFICACION_1'].str.strip() == proveedor_seleccionado]
+    else:
+        df_analisis = df
+
+    clientes_unicos = df_analisis['CLIENTE'].unique()
     if len(clientes_unicos) == 1:
-        st.subheader(f"🏪 Cliente: {df['ALIAS'].iloc[0]}")
-        st.caption(f"**Razón Social:** {df['NOMBRE'].iloc[0]} | **Código:** {df['CLIENTE'].iloc[0]}")
+        st.subheader(f"🏪 Cliente: {df_analisis['ALIAS'].iloc[0]}")
+        st.caption(f"**Razón Social:** {df_analisis['NOMBRE'].iloc[0]} | **Código:** {df_analisis['CLIENTE'].iloc[0]}")
     else:
         st.subheader("📊 Tabla Comparativa por Mes y Variación Porcentual")
 
     pivot_base = pd.pivot_table(
-        df,
+        df_analisis,
         index=['MES_NUM', 'MES_NOMBRE'],
         columns='ANIO',
         values='VENTA_NETA',
@@ -177,7 +436,7 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
         df_resultado[str(anio_actual)] = pivot_completa[anio_actual].apply(lambda x: f"₡{x:,.2f}")
         df_resultado[col_var_nombre] = [f"{v:+.2f}%" for v in variaciones]
 
-    styler = df_resultado.style.map(resaltar_variaciones, subset=columnas_variacion)
+    styler = df_resultado.style.map(resaltar_variaciones, subset=columnas_variacion) if columnas_variacion else df_resultado
     
     st.dataframe(
         styler, 
@@ -188,7 +447,7 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
 
     st.divider()
 
-    df_agrupado = df.groupby(['ANIO', 'MES_NUM', 'MES_NOMBRE'], as_index=False).agg({
+    df_agrupado = df_analisis.groupby(['ANIO', 'MES_NUM', 'MES_NOMBRE'], as_index=False).agg({
         'VENTA_NETA': 'sum',
         'CANTIDAD_NETA': 'sum'
     }).sort_values('MES_NUM')
@@ -200,7 +459,8 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     tipo_grafico = st.radio(
         "Métrica a visualizar en el gráfico:",
         options=["Venta Neta (₡)", "Cantidad Neta"],
-        horizontal=True
+        horizontal=True,
+        key="radio_metrica_grafico_dinamico"
     )
 
     columna_y = 'VENTA_NETA' if tipo_grafico == "Venta Neta (₡)" else 'CANTIDAD_NETA'
@@ -211,7 +471,7 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
         y=columna_y,
         color='ANIO_STR',
         markers=True,
-        title=f"Evolución Mensual Comparativa: {tipo_grafico}",
+        title=f"Evolución Mensual Comparativa ({seleccion_actual}): {tipo_grafico}",
         labels={
             'MES_NOMBRE': 'Mes',
             columna_y: tipo_grafico,
@@ -228,11 +488,14 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     fig.update_layout(height=450, hovermode="x unified")
     st.plotly_chart(fig, use_container_width=True)
 
+    pdf_buffer_global = None
+    if REPORTLAB_DISPONIBLE:
+        pdf_buffer_global = generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig)
+
     st.divider()
+    st.header("🏢 Comparativa por Proveedores y Sub-Marcas")
 
-    st.header("🏢 Comparativa por Proveedores y Categorías")
-
-    generar_tabla_comparativa_formateada(df, 'CLASIFICACION_1', 'Sedisur (Consolidado por Proveedor)')
+    generar_tabla_comparativa_formateada(df_analisis, 'CLASIFICACION_1', f'Resumen ({seleccion_actual})')
 
     st.markdown("---")
 
@@ -242,99 +505,235 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
         'REYA CR.', 'RECKITT'
     ]
 
-    orden_proveedores = [
-        'COLGATE_PALM',
-        'ESSITY',
-        'HEINZ.CR',
-        'ALIMER S.A.',
-        'PEPSICO',
-        'BARRAZA'
-    ]
+    proveedores_disponibles_sub = df_analisis['CLASIFICACION_1'].dropna().unique()
+    proveedores_a_mostrar = [p for p in lista_proveedores_final if p in proveedores_disponibles_sub]
+    otros_proveedores_sub = sorted([p for p in proveedores_disponibles_sub if p not in lista_proveedores_final])
+    proveedores_finales_sub = proveedores_a_mostrar + otros_proveedores_sub
 
-    proveedores_disponibles = df['CLASIFICACION_1'].dropna().unique()
-    proveedores_a_mostrar = [p for p in orden_proveedores if p in proveedores_disponibles]
-    otros_proveedores = sorted([p for p in proveedores_disponibles if p not in orden_proveedores])
-    proveedores_finales = proveedores_a_mostrar + otros_proveedores
-
-    for prov in proveedores_finales:
+    for prov in proveedores_finales_sub:
         prov_limpio = prov.strip()
         if prov_limpio not in proveedores_excluidos:
-            df_prov = df[df['CLASIFICACION_1'].str.strip() == prov_limpio]
+            df_prov = df_analisis[df_analisis['CLASIFICACION_1'].str.strip() == prov_limpio]
             if not df_prov.empty:
                 generar_tabla_comparativa_formateada(df_prov, 'CLASIFICACION_2', f"Proveedor: {prov}")
 
+    return pdf_buffer_global
+
 # ---------------------------------------------------------
-# 4. Flujo Principal de Ejecución de la App Web
+# 5. Vista Cobertura 8020
 # ---------------------------------------------------------
-with st.spinner("Cargando datos del reporte..."):
-    df_raw = cargar_datos_exactus()
+def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list, df_filtrado: pd.DataFrame):
+    st.header("🎯 Análisis de Cobertura 80/20 y Oportunidades de Alcance")
+    st.markdown("Utiliza el panel superior para configurar el **Filtro A** y múltiples marcas en el **Filtro B** para evaluar la cobertura y brechas.")
 
-# --- INICIALIZACIÓN SEGURA DE ESTADOS EN SESSION_STATE ---
-if "filtro_anios" not in st.session_state:
-    st.session_state["filtro_anios"] = sorted(df_raw['ANIO'].unique(), reverse=True)
+    if not filtro_a:
+        st.info("👆 Por favor, seleccione una opción en el **Filtro A (Referencia 80/20)** en el panel superior para calcular el Pareto.")
+        return
 
-if "filtro_meses" not in st.session_state:
-    mes_actual = datetime.now().month
-    mes_limite = mes_actual - 1 if mes_actual > 1 else 12
-    orden_meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
-                   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
-    st.session_state["filtro_meses"] = [m for i, m in enumerate(orden_meses[:mes_limite]) if m in df_raw['MES_NOMBRE'].unique()]
+    if df_filtrado.empty:
+        st.warning("No hay datos disponibles con los filtros seleccionados en el panel.")
+        return
 
-if "filtro_marcas" not in st.session_state:
-    st.session_state["filtro_marcas"] = []
+    if filtro_a == "TODOS (Consolidado Sedisur)":
+        df_ref_a = df_filtrado.copy()
+    else:
+        df_ref_a = df_filtrado[df_filtrado['CLASIFICACION_1'] == filtro_a]
 
-if "filtro_cats" not in st.session_state:
-    st.session_state["filtro_cats"] = []
+    if df_ref_a.empty:
+        st.warning("No se encontraron registros para la referencia seleccionada en el Filtro A con los filtros actuales.")
+        return
 
-if "filtro_clientes" not in st.session_state:
-    st.session_state["filtro_clientes"] = []
+    df_mensual_cliente = df_ref_a.groupby(['CLIENTE', 'ALIAS', 'CATEGORIA_CLIENTE', 'ANIO', 'MES_NUM'], as_index=False).agg(
+        VENTA_MES=('VENTA_NETA', 'sum')
+    )
 
-# --- FILTROS EN PANEL EXPANDIBLE SUPERIOR ---
-with st.expander("🔍 **Panel de Filtros Comerciales**", expanded=True):
-    
-    col_btn1, col_btn2 = st.columns([1, 3])
-    with col_btn1:
-        if st.button("🔄 Recargar Datos", help="Limpia la caché y vuelve a leer el archivo de datos"):
-            cargar_datos_exactus.clear()
-            st.toast("¡Datos recargados correctamente!", icon="✅")
+    df_clientes = df_mensual_cliente.groupby(['CLIENTE', 'ALIAS', 'CATEGORIA_CLIENTE'], as_index=False).agg(
+        VENTA_TOTAL_A=('VENTA_MES', 'sum'),
+        VENTA_PROMEDIO_A=('VENTA_MES', 'mean')
+    ).sort_values(by='VENTA_PROMEDIO_A', ascending=False)
+
+    if df_clientes.empty:
+        return
+
+    venta_total_promedio_acumulada = df_clientes['VENTA_PROMEDIO_A'].sum()
+    if venta_total_promedio_acumulada > 0:
+        df_clientes['PORCENTAJE_INDIVIDUAL'] = (df_clientes['VENTA_PROMEDIO_A'] / venta_total_promedio_acumulada) * 100
+        df_clientes['PORCENTAJE_ACUMULADO'] = df_clientes['PORCENTAJE_INDIVIDUAL'].cumsum()
+    else:
+        df_clientes['PORCENTAJE_INDIVIDUAL'] = 0.0
+        df_clientes['PORCENTAJE_ACUMULADO'] = 0.0
+
+    df_tabla_final = pd.DataFrame()
+    df_tabla_final['CLIENTE'] = df_clientes['CLIENTE']
+    df_tabla_final['Cód. Cliente'] = df_clientes['CLIENTE']
+    df_tabla_final['Alias'] = df_clientes['ALIAS']
+    df_tabla_final['Categoría Cliente'] = df_clientes['CATEGORIA_CLIENTE']
+    df_tabla_final['Venta Promedio Mensual (Filtro A)'] = df_clientes['VENTA_PROMEDIO_A'].apply(lambda x: f"₡{x:,.2f}")
+    df_tabla_final['% Individual'] = df_clientes['PORCENTAJE_INDIVIDUAL'].apply(lambda x: f"{x:.2f}%")
+    df_tabla_final['Cobertura Filtro A'] = "✅"
+
+    if filtros_b:
+        for prov_b in filtros_b:
+            df_ref_b = df_filtrado[df_filtrado['CLASIFICACION_1'] == prov_b]
+            df_clientes_b = df_ref_b.groupby('CLIENTE', as_index=False).agg(
+                VENTA_TOTAL_B=('VENTA_NETA', 'sum')
+            )
+
+            df_tabla_final = df_tabla_final.merge(df_clientes_b, on='CLIENTE', how='left')
+            df_tabla_final['VENTA_TOTAL_B'] = df_tabla_final['VENTA_TOTAL_B'].fillna(0)
+            
+            nombre_col_colocacion = f"Colocación: {prov_b}"
+            df_tabla_final[nombre_col_colocacion] = df_tabla_final['VENTA_TOTAL_B'].apply(lambda x: "✅" if x > 0 else "❌")
+            df_tabla_final = df_tabla_final.drop(columns=['VENTA_TOTAL_B'])
+
+    df_mostrar = df_tabla_final.drop(columns=['CLIENTE'])
+
+    titulo_b_str = f" vs ({', '.join(filtros_b)})" if filtros_b else ""
+    st.subheader(f"📊 Matriz de Cobertura para: {filtro_a}{titulo_b_str}")
+    st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
+
+# ---------------------------------------------------------
+# 6. Flujo Principal de Ejecución con Autenticación y Logotipo
+# ---------------------------------------------------------
+if verificar_acceso():
+    with st.spinner("Cargando datos del reporte..."):
+        df_raw = cargar_datos_exactus()
+
+    if "vista_activa" not in st.session_state:
+        st.session_state["vista_activa"] = "comparativa"
+
+    with st.sidebar:
+        # Inserción del logotipo oficial en la barra lateral
+        try:
+            st.image("Sedisur_logo.png", use_container_width=True)
+        except Exception:
+            st.markdown("### **Sedisur S.A.**")
+
+        st.markdown(f"👤 **Usuario:** {st.session_state.get('usuario_actual', '')}")
+        st.markdown(f"💼 **Cargo:** {st.session_state.get('cargo_actual', '')}")
+        st.markdown(f"🛡️ **Rol:** {st.session_state.get('rol_actual', '')}")
+        if st.button("Cerrar Sesión", use_container_width=True):
+            st.session_state["autenticado"] = False
+            st.rerun()
+        st.divider()
+
+        st.markdown("### 🧭 Menú Principal")
+        if st.button("📈 Comparativa de ventas", use_container_width=True):
+            st.session_state["vista_activa"] = "comparativa"
             st.rerun()
 
-    st.markdown("---")
+        if st.button("🎯 Cobertura 8020", use_container_width=True):
+            st.session_state["vista_activa"] = "cobertura"
+            st.rerun()
 
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        anios_disponibles = sorted(df_raw['ANIO'].unique(), reverse=True)
-        sel_anios = st.multiselect("Año", anios_disponibles, key="filtro_anios")
-        
-        meses_disponibles = [m for m in ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
-                                        'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'] if m in df_raw['MES_NOMBRE'].unique()]
-        sel_meses = st.multiselect("Mes", meses_disponibles, key="filtro_meses")
+        st.divider()
 
-    with col2:
-        marcas = sorted(df_raw['CLASIFICACION_1'].dropna().unique())
-        sel_marcas = st.multiselect("Clasificación 1 (Marca)", marcas, key="filtro_marcas")
-        
-        categorias = sorted(df_raw['CATEGORIA_CLIENTE'].dropna().unique())
-        sel_cats = st.multiselect("Categoría Cliente", categorias, key="filtro_cats")
+    if st.session_state["vista_activa"] == "comparativa":
+        with st.expander("🔍 **Panel de Filtros Comerciales (Comparativa)**", expanded=True):
+            col_btn1, col_btn_desc, col_space = st.columns([1.2, 1.2, 4.6])
+            with col_btn1:
+                if st.button("🔄 Recargar Datos", help="Limpia la caché y vuelve a leer el archivo de datos", use_container_width=True, key="btn_recargar_comp"):
+                    cargar_datos_exactus.clear()
+                    st.toast("¡Datos recargados correctamente!", icon="✅")
+                    st.rerun()
 
-    with col3:
-        clientes = sorted(df_raw['CLIENTE_DISPLAY'].dropna().unique())
-        sel_clientes = st.multiselect("Cliente", clientes, key="filtro_clientes")
+            st.markdown("---")
 
-# Filtrado de DataFrame
-df_filt = df_raw.copy()
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                anios_disponibles = sorted(df_raw['ANIO'].unique(), reverse=True)
+                sel_anios = st.multiselect("Año", anios_disponibles, key="filtro_anios")
+                
+                meses_disponibles = [m for m in ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
+                                                 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'] if m in df_raw['MES_NOMBRE'].unique()]
+                sel_meses = st.multiselect("Mes", meses_disponibles, key="filtro_meses")
 
-if sel_anios:
-    df_filt = df_filt[df_filt['ANIO'].isin(sel_anios)]
-if sel_meses:
-    df_filt = df_filt[df_filt['MES_NOMBRE'].isin(sel_meses)]
-if sel_marcas:
-    df_filt = df_filt[df_filt['CLASIFICACION_1'].isin(sel_marcas)]
-if sel_cats:
-    df_filt = df_filt[df_filt['CATEGORIA_CLIENTE'].isin(sel_cats)]
-if sel_clientes:
-    df_filt = df_filt[df_filt['CLIENTE_DISPLAY'].isin(sel_clientes)]
+            with col2:
+                marcas = sorted(df_raw['CLASIFICACION_1'].dropna().unique())
+                sel_marcas = st.multiselect("Clasificación 1 (Marca)", marcas, key="filtro_marcas")
+                
+                categorias = sorted(df_raw['CATEGORIA_CLIENTE'].dropna().unique())
+                sel_cats = st.multiselect("Categoría Cliente", categorias, key="filtro_cats")
 
-# Invocación de la Vista Comparativa Completa
-mostrar_vista_comparativa(df_filt)
+            with col3:
+                clientes = sorted(df_raw['CLIENTE_DISPLAY'].dropna().unique())
+                sel_clientes = st.multiselect("Cliente", clientes, key="filtro_clientes")
+
+                vendedores = sorted(df_raw['VENDEDOR'].dropna().unique())
+                sel_vendedores = st.multiselect("Vendedor", vendedores, key="filtro_vendedores")
+
+        df_filt = df_raw.copy()
+        if sel_anios:
+            df_filt = df_filt[df_filt['ANIO'].isin(sel_anios)]
+        if sel_meses:
+            df_filt = df_filt[df_filt['MES_NOMBRE'].isin(sel_meses)]
+        if sel_marcas:
+            df_filt = df_filt[df_filt['CLASIFICACION_1'].isin(sel_marcas)]
+        if sel_cats:
+            df_filt = df_filt[df_filt['CATEGORIA_CLIENTE'].isin(sel_cats)]
+        if sel_clientes:
+            df_filt = df_filt[df_filt['CLIENTE_DISPLAY'].isin(sel_clientes)]
+        if sel_vendedores:
+            df_filt = df_filt[df_filt['VENDEDOR'].isin(sel_vendedores)]
+
+        pdf_buffer_generado = mostrar_vista_comparativa(df_filt)
+
+        with col_btn_desc:
+            if REPORTLAB_DISPONIBLE and pdf_buffer_generado:
+                st.download_button(
+                    label="📥 Descargar PDF",
+                    data=pdf_buffer_generado,
+                    file_name="Informe_Sedisur_Ejecutivo.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    help="Descargar informe PDF completo con tablas y gráficos"
+                )
+
+    elif st.session_state["vista_activa"] == "cobertura":
+        with st.expander("🔍 **Panel de Filtros Comerciales (Cobertura 80/20)**", expanded=True):
+            col_btn1, col_space = st.columns([1.2, 5.8])
+            with col_btn1:
+                if st.button("🔄 Recargar Datos", help="Limpia la caché y vuelve a leer el archivo de datos", use_container_width=True, key="btn_recargar_cob"):
+                    cargar_datos_exactus.clear()
+                    st.toast("¡Datos recargados correctamente!", icon="✅")
+                    st.rerun()
+
+            st.markdown("---")
+
+            marcas_disponibles = sorted(df_raw['CLASIFICACION_1'].dropna().unique())
+            opciones_filtro_a = ["TODOS (Consolidado Sedisur)"] + list(marcas_disponibles)
+
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                anios_disponibles = sorted(df_raw['ANIO'].unique(), reverse=True)
+                sel_anios_cob = st.multiselect("Año", anios_disponibles, key="filtro_anios_cob")
+                
+                meses_disponibles = [m for m in ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
+                                                 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'] if m in df_raw['MES_NOMBRE'].unique()]
+                sel_meses_cob = st.multiselect("Mes", meses_disponibles, key="filtro_meses_cob")
+
+            with col2:
+                filtro_a = st.selectbox("📌 Filtro A (Referencia 80/20)", options=opciones_filtro_a, key="filtro_a_cob")
+                
+                categorias = sorted(df_raw['CATEGORIA_CLIENTE'].dropna().unique())
+                sel_cats_cob = st.multiselect("Categoría Cliente", categorias, key="filtro_cats_cob")
+
+            with col3:
+                filtros_b = st.multiselect("🔍 Filtro B (Comparativo de Colocación)", options=marcas_disponibles, key="filtro_b_cob")
+
+                vendedores = sorted(df_raw['VENDEDOR'].dropna().unique())
+                sel_vendedores_cob = st.multiselect("Vendedor", vendedores, key="filtro_vendedores_cob")
+
+        df_filt_cob = df_raw.copy()
+        if sel_anios_cob:
+            df_filt_cob = df_filt_cob[df_filt_cob['ANIO'].isin(sel_anios_cob)]
+        if sel_meses_cob:
+            df_filt_cob = df_filt_cob[df_filt_cob['MES_NOMBRE'].isin(sel_meses_cob)]
+        if sel_cats_cob:
+            df_filt_cob = df_filt_cob[df_filt_cob['CATEGORIA_CLIENTE'].isin(sel_cats_cob)]
+        if sel_vendedores_cob:
+            df_filt_cob = df_filt_cob[df_filt_cob['VENDEDOR'].isin(sel_vendedores_cob)]
+
+        mostrar_vista_cobertura_8020(df_raw, filtro_a, filtros_b, df_filt_cob)
