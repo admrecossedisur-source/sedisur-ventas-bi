@@ -426,12 +426,18 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     st.plotly_chart(fig, use_container_width=True)
 
     # ---------------------------------------------------------
-    # RESTAURACIÓN DE LAS TABLAS COMPARATIVAS POR PROVEEDORES Y CATEGORÍAS
+    # RESTAURACIÓN DE LAS TABLAS COMPARATIVAS (PROVEEDORES, SUB-MARCA Y CATEGORÍAS)
     # ---------------------------------------------------------
     st.divider()
-    st.header("🏢 Comparativa por Proveedores y Categorías")
+    st.header("🏢 Comparativa por Proveedores, Sub-Marca y Categorías")
     
     generar_tabla_comparativa_formateada(df_analisis, 'CLASIFICACION_1', f'Resumen por Proveedor ({seleccion_actual})')
+    
+    # Validación por si la columna de sub-marca está presente o nombrada de otra forma
+    col_submarca = 'CLASIFICACION_2' if 'CLASIFICACION_2' in df_analisis.columns else 'SUB_MARCA'
+    if col_submarca in df_analisis.columns:
+        generar_tabla_comparativa_formateada(df_analisis, col_submarca, f'Resumen por Sub-Marca ({seleccion_actual})')
+        
     generar_tabla_comparativa_formateada(df_analisis, 'CATEGORIA_CLIENTE', f'Resumen por Categoría de Cliente ({seleccion_actual})')
 
     return pdf_buffer_global
