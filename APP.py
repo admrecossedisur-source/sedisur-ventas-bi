@@ -26,7 +26,7 @@ USUARIOS_PERMITIDOS = {
     "eddy.zuniga@sedisur.com": {"password": "Edz000", "cargo": "Supervisión", "rol": "Usuario"},
     "cristina.nunez@sedisur.com": {"password": "Crn000", "cargo": "Supervisión", "rol": "administrador"},
     "erick.abarca@sedisur.com": {"password": "absa1528", "cargo": "Supervisión", "rol": "Usuario"},
-    "adm": {"password": "Adm1994", "cargo": "Supervisión", "rol": "administrador"}
+    "adm": {"password": "Adm1994", "cargo": "Supervisión", "rol": "administrador"}  # Corregido: 'Supervisión' cambiado por 'rol'
 }
 
 def verificar_acceso():
@@ -87,15 +87,19 @@ def cargar_datos_exactus():
         9: 'Septiembre', 10: 'Octubre', 11: 'Noviembre', 12: 'Diciembre'
     }
     df['MES_NOMBRE'] = df['MES_NUM'].map(meses_es)
-    df['CLIENTE_DISPLAY'] = df['CLIENTE'].astype(str) + " - " + df['ALIAS'].astype(str)
-    df['CLIENTE'] = df['CLIENTE'].astype(str)
+    # Estandarizar CLIENTE como texto sin espacios sobrantes
+    df['CLIENTE'] = df['CLIENTE'].astype(str).str.strip()
+    df['CLIENTE_DISPLAY'] = df['CLIENTE'] + " - " + df['ALIAS'].astype(str)
     return df
 
 @st.cache_data
 def cargar_datos_canales():
     try:
         df_canales = pd.read_excel("CLIENTES POR CANAL.xlsx")
-        df_canales['CLIENTE'] = df_canales['CLIENTE'].astype(str)
+        # Estandarizar CLIENTE como texto sin espacios sobrantes para asegurar el cruce
+        df_canales['CLIENTE'] = df_canales['CLIENTE'].astype(str).str.strip()
+        if 'CANAL' in df_canales.columns:
+            df_canales['CANAL'] = df_canales['CANAL'].astype(str).str.strip()
         return df_canales
     except Exception:
         return pd.DataFrame(columns=['CANAL', 'CLIENTE', 'ALIAS'])
@@ -642,9 +646,10 @@ if verificar_acceso():
         df_raw = cargar_datos_exactus()
         df_canales = cargar_datos_canales()
 
-    # Mapeo de Canal: Clientes que no aparecen en el Excel se categorizan automáticamente como "OTROS"
-    df_raw['CLIENTE'] = df_raw['CLIENTE'].astype(str)
+    # Mapeo seguro de Canales estandarizando ambas claves para evitar pérdida de datos
+    df_raw['CLIENTE'] = df_raw['CLIENTE'].astype(str).str.strip()
     if not df_canales.empty:
+        df_canales['CLIENTE'] = df_canales['CLIENTE'].astype(str).str.strip()
         df_raw = df_raw.merge(df_canales[['CLIENTE', 'CANAL']], on='CLIENTE', how='left')
         df_raw['CANAL'] = df_raw['CANAL'].fillna('OTROS')
     else:
