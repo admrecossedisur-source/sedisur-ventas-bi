@@ -74,37 +74,57 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# 2. Carga de Datos Segura y Mapeo de Canales
+# 2. Funciones de Carga y Procesamiento de Datos
 # ---------------------------------------------------------
-@st.cache_data
-def cargar_datos_exactus():
-    df = pd.read_parquet("datos_ventas.parquet")
-    df = df[df['CLASIFICACION_1'].notna() & (df['CLASIFICACION_1'].astype(str).str.strip() != '') & (df['CLASIFICACION_1'] != 'SIN CLASIFICAR')]
-
-    meses_es = {
-        1: 'Enero', 2: 'Febrero', 3: 'Marzo', 4: 'Abril',
-        5: 'Mayo', 6: 'Junio', 7: 'Julio', 8: 'Agosto',
-        9: 'Septiembre', 10: 'Octubre', 11: 'Noviembre', 12: 'Diciembre'
-    }
-    df['MES_NOMBRE'] = df['MES_NUM'].map(meses_es)
-    # Estandarizar CLIENTE como texto sin espacios sobrantes
-    df['CLIENTE'] = df['CLIENTE'].astype(str).str.strip()
-    df['CLIENTE_DISPLAY'] = df['CLIENTE'] + " - " + df['ALIAS'].astype(str)
-    return df
-
 @st.cache_data
 def cargar_datos_canales():
-    try:
-        df_canales = pd.read_excel("CLIENTES POR CANAL.xlsx")
-        # Estandarizar CLIENTE como texto sin espacios sobrantes para asegurar el cruce
-        df_canales['CLIENTE'] = df_canales['CLIENTE'].astype(str).str.strip()
-        if 'CANAL' in df_canales.columns:
-            df_canales['CANAL'] = df_canales['CANAL'].astype(str).str.strip()
-        return df_canales
-    except Exception:
-        return pd.DataFrame(columns=['CANAL', 'CLIENTE', 'ALIAS'])
+    # Sin try-except silencioso para detectar cualquier incidencia de lectura de forma clara
+    df_canales = pd.read_excel("CLIENTES POR CANAL.xlsx")
+    df_canales['CLIENTE'] = df_canales['CLIENTE'].astype(str).str.strip()
+    if 'CANAL' in df_canales.columns:
+        df_canales['CANAL'] = df_canales['CANAL'].astype(str).str.strip()
+    return df_canales
 
-# ---------------------------------------------------------
+@st.cache_data
+def cargar_datos():
+    try:
+        df = pd.read_parquet("datos_ventas.parquet")
+    except Exception as e:
+        st.error(f"Error al cargar 'datos_ventas.parquet': {e}")
+        return pd.DataFrame()
+
+    # Normalizar columnas de texto clave
+    if 'CLIENTE' in df.columns:
+        df['CLIENTE'] = df['CLIENTE'].astype(str).str.strip()
+    if 'VENDEDOR' in df.columns:
+        df['VENDEDOR'] = df['VENDEDOR'].astype(str).str.strip()
+    if 'CATEGORIA_CLIENTE' in df.columns:
+        df['CATEGORIA_CLIENTE'] = df['CATEGORIA_CLIENTE'].astype(str).str.strip()
+
+    # Asegurar fecha y extraer componentes temporales
+    if 'FECHA' in df.columns:
+        df['FECHA'] = pd.to_datetime(df['FECHA'], errors='coerce')
+        df['ANIO'] = df['FECHA'].dt.year
+        df['MES'] = df['FECHA'].dt.month
+        df['MES_NOMBRE'] = df['FECHA'].dt.strftime('%B')
+        df['ANIO_MES'] = df['FECHA'].dt.to_period('M').astype(str)
+
+    # Cruce con la base de canales
+    try:
+        df_canales = cargar_datos_canales()
+        if not df_canales.empty and 'CLIENTE' in df.columns:
+            df = df.merge(df_canales[['CLIENTE', 'CANAL', 'ALIAS']], on='CLIENTE', how='left')
+            df['CANAL'] = df['CANAL'].fillna('OTROS')
+            df['ALIAS'] = df['ALIAS'].fillna(df['CLIENTE'])
+        else:
+            df['CANAL'] = 'OTROS'
+            df['ALIAS'] = df['CLIENTE']
+    except Exception:
+        df['CANAL'] = 'OTROS'
+        df['ALIAS'] = df['CLIENTE']
+
+    return df
+#---------------------------------------------------------
 # 3. Funciones de Apoyo (Cálculos y Tablas)
 # ---------------------------------------------------------
 def calcular_variacion(actual, anterior):
