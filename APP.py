@@ -26,7 +26,7 @@ USUARIOS_PERMITIDOS = {
     "eddy.zuniga@sedisur.com": {"password": "Edz000", "cargo": "Supervisión", "rol": "Usuario"},
     "cristina.nunez@sedisur.com": {"password": "Crn000", "cargo": "Supervisión", "rol": "administrador"},
     "erick.abarca@sedisur.com": {"password": "absa1528", "cargo": "Supervisión", "rol": "Usuario"},
-    "adm": {"password": "Adm1994", "cargo": "Supervisión", "Supervisión": "administrador"}
+    "adm": {"password": "Adm1994", "cargo": "Supervisión", "rol": "administrador"}
 }
 
 def verificar_acceso():
