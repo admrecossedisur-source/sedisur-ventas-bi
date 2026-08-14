@@ -26,7 +26,7 @@ USUARIOS_PERMITIDOS = {
     "eddy.zuniga@sedisur.com": {"password": "Edz000", "cargo": "Supervisión", "rol": "Usuario"},
     "cristina.nunez@sedisur.com": {"password": "Crn000", "cargo": "Supervisión", "rol": "administrador"},
     "erick.abarca@sedisur.com": {"password": "Era000", "cargo": "Supervisión", "rol": "Usuario"},
-    "adm": {"password": "adm1994", "cargo": "Supervisión", "rol": "administrador"}
+    "adm": {"password": "Adm1994", "cargo": "Supervisión", "Supervisión": "administrador"}
 }
 
 def verificar_acceso():
@@ -38,7 +38,6 @@ def verificar_acceso():
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        # Reemplazamos st.image con un ancho controlado usando el parámetro width
         try:
             st.image("Sedisur_logo.png", width=250)
         except Exception:
@@ -66,7 +65,7 @@ def verificar_acceso():
     return False
 
 # ---------------------------------------------------------
-# 1. Configuración Inicial de la Página (Favicon e Icono)
+# 1. Configuración Inicial de la Página
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="Sedisur BI - Comparativa de Ventas",
@@ -75,12 +74,11 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# 2. Carga de Datos Segura
+# 2. Carga de Datos Segura y Mapeo de Canales
 # ---------------------------------------------------------
 @st.cache_data
 def cargar_datos_exactus():
     df = pd.read_parquet("datos_ventas.parquet")
-    
     df = df[df['CLASIFICACION_1'].notna() & (df['CLASIFICACION_1'].astype(str).str.strip() != '') & (df['CLASIFICACION_1'] != 'SIN CLASIFICAR')]
 
     meses_es = {
@@ -90,8 +88,17 @@ def cargar_datos_exactus():
     }
     df['MES_NOMBRE'] = df['MES_NUM'].map(meses_es)
     df['CLIENTE_DISPLAY'] = df['CLIENTE'].astype(str) + " - " + df['ALIAS'].astype(str)
-    
+    df['CLIENTE'] = df['CLIENTE'].astype(str)
     return df
+
+@st.cache_data
+def cargar_datos_canales():
+    try:
+        df_canales = pd.read_excel("CLIENTES POR CANAL.xlsx")
+        df_canales['CLIENTE'] = df_canales['CLIENTE'].astype(str)
+        return df_canales
+    except Exception:
+        return pd.DataFrame(columns=['CANAL', 'CLIENTE', 'ALIAS'])
 
 # ---------------------------------------------------------
 # 3. Funciones de Apoyo (Cálculos y Tablas)
@@ -520,7 +527,7 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     return pdf_buffer_global
 
 # ---------------------------------------------------------
-# 5. Vista Cobertura 8020 (Actualizada con Estilo y Posición)
+# 5. Vista Cobertura 8020 (Filtros A y B juntos arriba)
 # ---------------------------------------------------------
 def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list, df_filtrado: pd.DataFrame):
     st.header("🎯 Análisis de Cobertura 80/20 y Oportunidades de Alcance")
@@ -543,7 +550,6 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
         st.warning("No se encontraron registros para la referencia seleccionada en el Filtro A con los filtros actuales.")
         return
 
-    # 1. Agrupación base para el Pareto (promedio mensual por cliente)
     df_mensual_cliente = df_ref_a.groupby(['CLIENTE', 'ALIAS', 'CATEGORIA_CLIENTE', 'ANIO', 'MES_NUM'], as_index=False).agg(
         VENTA_MES=('VENTA_NETA', 'sum')
     )
@@ -560,10 +566,8 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
     if df_clientes.empty:
         return
 
-    # Añadir la posición (Ranking)
     df_clientes['Posición'] = df_clientes.index + 1
 
-    # Cálculo seguro de porcentajes (inicializados para evitar KeyError)
     venta_total_promedio_acumulada = df_clientes['VENTA_PROMEDIO_A'].sum()
     df_clientes['PORCENTAJE_INDIVIDUAL'] = 0.0
     df_clientes['PORCENTAJE_ACUMULADO'] = 0.0
@@ -572,7 +576,6 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
         df_clientes['PORCENTAJE_INDIVIDUAL'] = (df_clientes['VENTA_PROMEDIO_A'] / venta_total_promedio_acumulada) * 100
         df_clientes['PORCENTAJE_ACUMULADO'] = df_clientes['PORCENTAJE_INDIVIDUAL'].cumsum()
 
-    # 2. Cálculo de la venta del mes más reciente (actual) dentro del Filtro A filtrado
     if not df_ref_a.empty and 'ANIO' in df_ref_a.columns and 'MES_NUM' in df_ref_a.columns:
         max_anio = df_ref_a['ANIO'].max()
         df_mes_actual_ref = df_ref_a[(df_ref_a['ANIO'] == max_anio)]
@@ -588,21 +591,19 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
     else:
         df_venta_mes_actual = pd.DataFrame(columns=['CLIENTE', 'VENTA_MES_ACTUAL'])
 
-    # Fusionar la venta del mes actual
     df_clientes = df_clientes.merge(df_venta_mes_actual, on='CLIENTE', how='left')
     df_clientes['VENTA_MES_ACTUAL'] = df_clientes['VENTA_MES_ACTUAL'].fillna(0)
 
-    # 3. Construcción del DataFrame final para visualización (Orden de columnas ajustado)
     df_tabla_final = pd.DataFrame()
     df_tabla_final['Posición'] = df_clientes['Posición']
-    df_tabla_final['CLIENTE'] = df_clientes['CLIENTE'] # Columna oculta para referencias internas
+    df_tabla_final['CLIENTE'] = df_clientes['CLIENTE']
     df_tabla_final['Cód. Cliente'] = df_clientes['CLIENTE']
     df_tabla_final['Alias'] = df_clientes['ALIAS']
     df_tabla_final['Categoría Cliente'] = df_clientes['CATEGORIA_CLIENTE']
     df_tabla_final['% Individual'] = df_clientes['PORCENTAJE_INDIVIDUAL'].apply(lambda x: f"{x:.2f}%")
     df_tabla_final['Venta Promedio Mensual (Filtro A)'] = df_clientes['VENTA_PROMEDIO_A'].apply(lambda x: f"₡{x:,.2f}")
     df_tabla_final['Venta Mes Actual'] = df_clientes['VENTA_MES_ACTUAL'].apply(lambda x: f"₡{x:,.2f}")
-    df_tabla_final['% Acumulado'] = df_clientes['PORCENTAJE_ACUMULADO'] # Campo temporal para la regla de estilo
+    df_tabla_final['% Acumulado'] = df_clientes['PORCENTAJE_ACUMULADO']
     df_tabla_final['Cobertura Filtro A'] = "✅"
 
     if filtros_b:
@@ -619,7 +620,6 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
             df_tabla_final[nombre_col_colocacion] = df_tabla_final['VENTA_TOTAL_B'].apply(lambda x: "✅" if x > 0 else "❌")
             df_tabla_final = df_tabla_final.drop(columns=['VENTA_TOTAL_B'])
 
-    # Función interna para pintar solo la tipografía de verde para los porcentajes del 80/20 (sin relleno)
     def resaltar_8020(row):
         styles = [''] * len(row)
         idx_porc = row.index.get_loc('% Individual')
@@ -627,27 +627,33 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
             styles[idx_porc] = 'color: #2e7d32; font-weight: bold;'
         return styles
 
-    # Limpiamos columnas auxiliares que no se muestran directamente
     df_mostrar = df_tabla_final.drop(columns=['CLIENTE', '% Acumulado'])
-
-    # Aplicar estilos con Styler
     styler_8020 = df_mostrar.style.apply(resaltar_8020, axis=1)
 
     titulo_b_str = f" vs ({', '.join(filtros_b)})" if filtros_b else ""
     st.subheader(f"📊 Matriz de Cobertura para: {filtro_a}{titulo_b_str}")
     st.dataframe(styler_8020, use_container_width=True, hide_index=True)
+
 # ---------------------------------------------------------
-# 6. Flujo Principal de Ejecución con Autenticación y Logotipo
+# 6. Flujo Principal de Ejecución
 # ---------------------------------------------------------
 if verificar_acceso():
     with st.spinner("Cargando datos del reporte..."):
         df_raw = cargar_datos_exactus()
+        df_canales = cargar_datos_canales()
+
+    # Mapeo de Canal: Clientes que no aparecen en el Excel se categorizan automáticamente como "OTROS"
+    df_raw['CLIENTE'] = df_raw['CLIENTE'].astype(str)
+    if not df_canales.empty:
+        df_raw = df_raw.merge(df_canales[['CLIENTE', 'CANAL']], on='CLIENTE', how='left')
+        df_raw['CANAL'] = df_raw['CANAL'].fillna('OTROS')
+    else:
+        df_raw['CANAL'] = 'OTROS'
 
     if "vista_activa" not in st.session_state:
         st.session_state["vista_activa"] = "comparativa"
 
     with st.sidebar:
-        # Inserción del logotipo oficial en la barra lateral
         try:
             st.image("Sedisur_logo.png", use_container_width=True)
         except Exception:
@@ -656,6 +662,15 @@ if verificar_acceso():
         st.markdown(f"👤 **Usuario:** {st.session_state.get('usuario_actual', '')}")
         st.markdown(f"💼 **Cargo:** {st.session_state.get('cargo_actual', '')}")
         st.markdown(f"🛡️ **Rol:** {st.session_state.get('rol_actual', '')}")
+        
+        st.markdown("---")
+        
+        if st.button("🔄 Recargar Datos", use_container_width=True, help="Limpia la caché y recarga los datos"):
+            cargar_datos_exactus.clear()
+            cargar_datos_canales.clear()
+            st.toast("¡Datos recargados correctamente!", icon="✅")
+            st.rerun()
+
         if st.button("Cerrar Sesión", use_container_width=True):
             st.session_state["autenticado"] = False
             st.rerun()
@@ -672,16 +687,17 @@ if verificar_acceso():
 
         st.divider()
 
+    # Obtener lista completa de canales incluyendo explícitamente "OTROS"
+    lista_canales = ['TODOS'] + sorted([c for c in df_raw['CANAL'].dropna().unique().tolist() if c != 'OTROS']) + ['OTROS']
+    
+    # Lista de clientes para el multiselect (Código - Alias) exclusiva de Comparativa
+    df_clientes_unicos = df_raw[['CLIENTE', 'ALIAS']].drop_duplicates().sort_values('CLIENTE')
+    opciones_clientes = df_clientes_unicos['CLIENTE'].tolist()
+    format_func_cliente = lambda x: f"{x} - {df_clientes_unicos[df_clientes_unicos['CLIENTE'] == x]['ALIAS'].values[0]}" if x in df_clientes_unicos['CLIENTE'].values else str(x)
+
     if st.session_state["vista_activa"] == "comparativa":
         with st.expander("🔍 **Panel de Filtros Comerciales (Comparativa)**", expanded=True):
-            col_btn1, col_btn_desc, col_space = st.columns([1.2, 1.2, 4.6])
-            with col_btn1:
-                if st.button("🔄 Recargar Datos", help="Limpia la caché y vuelve a leer el archivo de datos", use_container_width=True, key="btn_recargar_comp"):
-                    cargar_datos_exactus.clear()
-                    st.toast("¡Datos recargados correctamente!", icon="✅")
-                    st.rerun()
-
-            st.markdown("---")
+            col_btn_desc, col_space = st.columns([1.2, 5.8])
 
             col1, col2, col3 = st.columns(3)
             
@@ -701,13 +717,19 @@ if verificar_acceso():
                 sel_cats = st.multiselect("Categoría Cliente", categorias, key="filtro_cats")
 
             with col3:
-                clientes = sorted(df_raw['CLIENTE_DISPLAY'].dropna().unique())
-                sel_clientes = st.multiselect("Cliente", clientes, key="filtro_clientes")
-
+                filtro_canal_sel = st.selectbox("Canal", lista_canales, key="filtro_canal_comp")
                 vendedores = sorted(df_raw['VENDEDOR'].dropna().unique())
                 sel_vendedores = st.multiselect("Vendedor", vendedores, key="filtro_vendedores")
 
-        df_filt = df_raw.copy()
+            # Filtro por Código de Cliente solo en Comparativa
+            sel_clientes = st.multiselect("Cliente (Código y Alias)", options=opciones_clientes, format_func=format_func_cliente, key="filtro_clientes_comp")
+
+        # Aplicar filtros
+        df_raw_global = df_raw.copy()
+        if filtro_canal_sel != 'TODOS':
+            df_raw_global = df_raw_global[df_raw_global['CANAL'] == filtro_canal_sel]
+
+        df_filt = df_raw_global.copy()
         if sel_anios:
             df_filt = df_filt[df_filt['ANIO'].isin(sel_anios)]
         if sel_meses:
@@ -716,10 +738,10 @@ if verificar_acceso():
             df_filt = df_filt[df_filt['CLASIFICACION_1'].isin(sel_marcas)]
         if sel_cats:
             df_filt = df_filt[df_filt['CATEGORIA_CLIENTE'].isin(sel_cats)]
-        if sel_clientes:
-            df_filt = df_filt[df_filt['CLIENTE_DISPLAY'].isin(sel_clientes)]
         if sel_vendedores:
             df_filt = df_filt[df_filt['VENDEDOR'].isin(sel_vendedores)]
+        if sel_clientes:
+            df_filt = df_filt[df_filt['CLIENTE'].isin(sel_clientes)]
 
         pdf_buffer_generado = mostrar_vista_comparativa(df_filt)
 
@@ -736,21 +758,19 @@ if verificar_acceso():
 
     elif st.session_state["vista_activa"] == "cobertura":
         with st.expander("🔍 **Panel de Filtros Comerciales (Cobertura 80/20)**", expanded=True):
-            col_btn1, col_space = st.columns([1.2, 5.8])
-            with col_btn1:
-                if st.button("🔄 Recargar Datos", help="Limpia la caché y vuelve a leer el archivo de datos", use_container_width=True, key="btn_recargar_cob"):
-                    cargar_datos_exactus.clear()
-                    st.toast("¡Datos recargados correctamente!", icon="✅")
-                    st.rerun()
-
-            st.markdown("---")
-
             marcas_disponibles = sorted(df_raw['CLASIFICACION_1'].dropna().unique())
             opciones_filtro_a = ["TODOS (Consolidado Sedisur)"] + list(marcas_disponibles)
+            vendedores_disponibles = sorted(df_raw['VENDEDOR'].dropna().unique())
 
             col1, col2, col3 = st.columns(3)
             
             with col1:
+                # Columna 1: Filtro A y Filtro B juntos arriba
+                filtro_a = st.selectbox("📌 Filtro A (Referencia 80/20)", options=opciones_filtro_a, key="filtro_a_cob")
+                filtros_b = st.multiselect("🔍 Filtro B (Comparativo de Colocación)", options=marcas_disponibles, key="filtro_b_cob")
+
+            with col2:
+                # Columna 2: Año y Mes
                 anios_disponibles = sorted(df_raw['ANIO'].unique(), reverse=True)
                 sel_anios_cob = st.multiselect("Año", anios_disponibles, key="filtro_anios_cob")
                 
@@ -758,19 +778,15 @@ if verificar_acceso():
                                                  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'] if m in df_raw['MES_NOMBRE'].unique()]
                 sel_meses_cob = st.multiselect("Mes", meses_disponibles, key="filtro_meses_cob")
 
-            with col2:
-                filtro_a = st.selectbox("📌 Filtro A (Referencia 80/20)", options=opciones_filtro_a, key="filtro_a_cob")
-                
+            with col3:
+                # Columna 3: Vendedor y Categoría Cliente
+                sel_vendedores_cob = st.multiselect("Vendedor", vendedores_disponibles, key="filtro_vendedores_cob")
                 categorias = sorted(df_raw['CATEGORIA_CLIENTE'].dropna().unique())
                 sel_cats_cob = st.multiselect("Categoría Cliente", categorias, key="filtro_cats_cob")
 
-            with col3:
-                filtros_b = st.multiselect("🔍 Filtro B (Comparativo de Colocación)", options=marcas_disponibles, key="filtro_b_cob")
+        df_raw_global_cob = df_raw.copy()
 
-                vendedores = sorted(df_raw['VENDEDOR'].dropna().unique())
-                sel_vendedores_cob = st.multiselect("Vendedor", vendedores, key="filtro_vendedores_cob")
-
-        df_filt_cob = df_raw.copy()
+        df_filt_cob = df_raw_global_cob.copy()
         if sel_anios_cob:
             df_filt_cob = df_filt_cob[df_filt_cob['ANIO'].isin(sel_anios_cob)]
         if sel_meses_cob:
@@ -780,4 +796,4 @@ if verificar_acceso():
         if sel_vendedores_cob:
             df_filt_cob = df_filt_cob[df_filt_cob['VENDEDOR'].isin(sel_vendedores_cob)]
 
-        mostrar_vista_cobertura_8020(df_raw, filtro_a, filtros_b, df_filt_cob)
+        mostrar_vista_cobertura_8020(df_raw_global_cob, filtro_a, filtros_b, df_filt_cob)
