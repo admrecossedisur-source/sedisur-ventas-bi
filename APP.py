@@ -25,7 +25,7 @@ USUARIOS_PERMITIDOS = {
     "harvy.arbustini@sedisur.com": {"password": "Haa000", "cargo": "Supervisión", "rol": "Usuario"},
     "eddy.zuniga@sedisur.com": {"password": "Edz000", "cargo": "Supervisión", "rol": "Usuario"},
     "cristina.nunez@sedisur.com": {"password": "Crn000", "cargo": "Supervisión", "rol": "administrador"},
-    "erick.abarca@sedisur.com": {"password": "Era000", "cargo": "Supervisión", "rol": "Usuario"},
+    "erick.abarca@sedisur.com": {"password": "absa1528", "cargo": "Supervisión", "rol": "Usuario"},
     "adm": {"password": "Adm1994", "cargo": "Supervisión", "Supervisión": "administrador"}
 }
 
