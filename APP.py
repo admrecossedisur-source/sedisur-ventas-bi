@@ -74,7 +74,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# 2. Carga de Datos Segura y Mapeo de Canales
+# 2. Carga de Datos Segura y Mapeo de Canales (Corregido)
 # ---------------------------------------------------------
 @st.cache_data
 def cargar_datos_exactus():
@@ -95,12 +95,23 @@ def cargar_datos_exactus():
 def cargar_datos_canales():
     try:
         df_canales = pd.read_excel("CLIENTES POR CANAL.xlsx")
-        df_canales['CLIENTE'] = df_canales['CLIENTE'].astype(str).str.strip()
-        if 'CANAL' in df_canales.columns:
+        # Limpiar nombres de columnas para evitar errores de espacios o mayúsculas
+        df_canales.columns = [str(c).strip().upper() for c in df_canales.columns]
+        
+        # Buscar la columna de cliente y de canal de forma flexible
+        col_cliente = next((c for c in df_canales.columns if 'CLIENTE' in c), None)
+        col_canal = next((c for c in df_canales.columns if 'CANAL' in c), None)
+        
+        if col_cliente and col_canal:
+            df_canales = df_canales[[col_cliente, col_canal]].copy()
+            df_canales.columns = ['CLIENTE', 'CANAL']
+            df_canales['CLIENTE'] = df_canales['CLIENTE'].astype(str).str.strip()
             df_canales['CANAL'] = df_canales['CANAL'].astype(str).str.strip()
-        return df_canales
-    except Exception:
-        return pd.DataFrame(columns=['CANAL', 'CLIENTE', 'ALIAS'])
+            return df_canales
+    except Exception as e:
+        st.warning(f"No se pudo cargar el archivo de canales: {e}")
+    
+    return pd.DataFrame(columns=['CLIENTE', 'CANAL'])
 
 # ---------------------------------------------------------
 # 3. Funciones de Apoyo (Cálculos y Tablas)
