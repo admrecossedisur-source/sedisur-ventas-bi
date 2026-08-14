@@ -20,7 +20,7 @@ except ImportError:
 USUARIOS_PERMITIDOS = {
     "kenneth.martinez@sedisur.com": {"password": "Kem000", "cargo": "Gerencia", "rol": "Usuario"},
     "custodio.arias@sedisur.com": {"password": "Cua000", "cargo": "Gerencia", "rol": "Usuario"},
-    "henry.azofeifa@sedisur.com": {"password": "Hea000", "cargo": "Gerencia", "rol": "Usuario"},
+    "henry.azofeifa@sedisur.com": {"password": "Henry1979", "cargo": "Gerencia", "rol": "Usuario"},
     "diego.barrantes@sedisur.com": {"password": "Dib000", "cargo": "Supervisión", "rol": "Usuario"},
     "harvy.arbustini@sedisur.com": {"password": "Haa000", "cargo": "Supervisión", "rol": "Usuario"},
     "eddy.zuniga@sedisur.com": {"password": "Edz000", "cargo": "Supervisión", "rol": "Usuario"},
@@ -38,9 +38,9 @@ def verificar_acceso():
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        # Mostramos el logo también en la pantalla de login de forma elegante
+        # Reemplazamos st.image con un ancho controlado usando el parámetro width
         try:
-            st.image("Sedisur_logo.png", use_container_width=True)
+            st.image("Sedisur_logo.png", width=250)
         except Exception:
             pass
             
@@ -520,7 +520,7 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     return pdf_buffer_global
 
 # ---------------------------------------------------------
-# 5. Vista Cobertura 8020
+# 5. Vista Cobertura 8020 (Actualizada con Estilo y Posición)
 # ---------------------------------------------------------
 def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list, df_filtrado: pd.DataFrame):
     st.header("🎯 Análisis de Cobertura 80/20 y Oportunidades de Alcance")
@@ -543,33 +543,66 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
         st.warning("No se encontraron registros para la referencia seleccionada en el Filtro A con los filtros actuales.")
         return
 
+    # 1. Agrupación base para el Pareto (promedio mensual por cliente)
     df_mensual_cliente = df_ref_a.groupby(['CLIENTE', 'ALIAS', 'CATEGORIA_CLIENTE', 'ANIO', 'MES_NUM'], as_index=False).agg(
         VENTA_MES=('VENTA_NETA', 'sum')
     )
 
+    if df_mensual_cliente.empty:
+        st.warning("No se encontraron registros para calcular la cobertura con los filtros actuales.")
+        return
+
     df_clientes = df_mensual_cliente.groupby(['CLIENTE', 'ALIAS', 'CATEGORIA_CLIENTE'], as_index=False).agg(
         VENTA_TOTAL_A=('VENTA_MES', 'sum'),
         VENTA_PROMEDIO_A=('VENTA_MES', 'mean')
-    ).sort_values(by='VENTA_PROMEDIO_A', ascending=False)
+    ).sort_values(by='VENTA_PROMEDIO_A', ascending=False).reset_index(drop=True)
 
     if df_clientes.empty:
         return
 
+    # Añadir la posición (Ranking)
+    df_clientes['Posición'] = df_clientes.index + 1
+
+    # Cálculo seguro de porcentajes (inicializados para evitar KeyError)
     venta_total_promedio_acumulada = df_clientes['VENTA_PROMEDIO_A'].sum()
+    df_clientes['PORCENTAJE_INDIVIDUAL'] = 0.0
+    df_clientes['PORCENTAJE_ACUMULADO'] = 0.0
+
     if venta_total_promedio_acumulada > 0:
         df_clientes['PORCENTAJE_INDIVIDUAL'] = (df_clientes['VENTA_PROMEDIO_A'] / venta_total_promedio_acumulada) * 100
         df_clientes['PORCENTAJE_ACUMULADO'] = df_clientes['PORCENTAJE_INDIVIDUAL'].cumsum()
-    else:
-        df_clientes['PORCENTAJE_INDIVIDUAL'] = 0.0
-        df_clientes['PORCENTAJE_ACUMULADO'] = 0.0
 
+    # 2. Cálculo de la venta del mes más reciente (actual) dentro del Filtro A filtrado
+    if not df_ref_a.empty and 'ANIO' in df_ref_a.columns and 'MES_NUM' in df_ref_a.columns:
+        max_anio = df_ref_a['ANIO'].max()
+        df_mes_actual_ref = df_ref_a[(df_ref_a['ANIO'] == max_anio)]
+        if not df_mes_actual_ref.empty:
+            max_mes = df_mes_actual_ref['MES_NUM'].max()
+            df_mes_actual_ref = df_mes_actual_ref[df_mes_actual_ref['MES_NUM'] == max_mes]
+            
+            df_venta_mes_actual = df_mes_actual_ref.groupby('CLIENTE', as_index=False).agg(
+                VENTA_MES_ACTUAL=('VENTA_NETA', 'sum')
+            )
+        else:
+            df_venta_mes_actual = pd.DataFrame(columns=['CLIENTE', 'VENTA_MES_ACTUAL'])
+    else:
+        df_venta_mes_actual = pd.DataFrame(columns=['CLIENTE', 'VENTA_MES_ACTUAL'])
+
+    # Fusionar la venta del mes actual
+    df_clientes = df_clientes.merge(df_venta_mes_actual, on='CLIENTE', how='left')
+    df_clientes['VENTA_MES_ACTUAL'] = df_clientes['VENTA_MES_ACTUAL'].fillna(0)
+
+    # 3. Construcción del DataFrame final para visualización (Orden de columnas ajustado)
     df_tabla_final = pd.DataFrame()
-    df_tabla_final['CLIENTE'] = df_clientes['CLIENTE']
+    df_tabla_final['Posición'] = df_clientes['Posición']
+    df_tabla_final['CLIENTE'] = df_clientes['CLIENTE'] # Columna oculta para referencias internas
     df_tabla_final['Cód. Cliente'] = df_clientes['CLIENTE']
     df_tabla_final['Alias'] = df_clientes['ALIAS']
     df_tabla_final['Categoría Cliente'] = df_clientes['CATEGORIA_CLIENTE']
-    df_tabla_final['Venta Promedio Mensual (Filtro A)'] = df_clientes['VENTA_PROMEDIO_A'].apply(lambda x: f"₡{x:,.2f}")
     df_tabla_final['% Individual'] = df_clientes['PORCENTAJE_INDIVIDUAL'].apply(lambda x: f"{x:.2f}%")
+    df_tabla_final['Venta Promedio Mensual (Filtro A)'] = df_clientes['VENTA_PROMEDIO_A'].apply(lambda x: f"₡{x:,.2f}")
+    df_tabla_final['Venta Mes Actual'] = df_clientes['VENTA_MES_ACTUAL'].apply(lambda x: f"₡{x:,.2f}")
+    df_tabla_final['% Acumulado'] = df_clientes['PORCENTAJE_ACUMULADO'] # Campo temporal para la regla de estilo
     df_tabla_final['Cobertura Filtro A'] = "✅"
 
     if filtros_b:
@@ -586,12 +619,23 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
             df_tabla_final[nombre_col_colocacion] = df_tabla_final['VENTA_TOTAL_B'].apply(lambda x: "✅" if x > 0 else "❌")
             df_tabla_final = df_tabla_final.drop(columns=['VENTA_TOTAL_B'])
 
-    df_mostrar = df_tabla_final.drop(columns=['CLIENTE'])
+    # Función interna para pintar solo la tipografía de verde para los porcentajes del 80/20 (sin relleno)
+    def resaltar_8020(row):
+        styles = [''] * len(row)
+        idx_porc = row.index.get_loc('% Individual')
+        if df_clientes.loc[row.name, 'PORCENTAJE_ACUMULADO'] <= 80.0:
+            styles[idx_porc] = 'color: #2e7d32; font-weight: bold;'
+        return styles
+
+    # Limpiamos columnas auxiliares que no se muestran directamente
+    df_mostrar = df_tabla_final.drop(columns=['CLIENTE', '% Acumulado'])
+
+    # Aplicar estilos con Styler
+    styler_8020 = df_mostrar.style.apply(resaltar_8020, axis=1)
 
     titulo_b_str = f" vs ({', '.join(filtros_b)})" if filtros_b else ""
     st.subheader(f"📊 Matriz de Cobertura para: {filtro_a}{titulo_b_str}")
-    st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
-
+    st.dataframe(styler_8020, use_container_width=True, hide_index=True)
 # ---------------------------------------------------------
 # 6. Flujo Principal de Ejecución con Autenticación y Logotipo
 # ---------------------------------------------------------
