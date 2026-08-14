@@ -47,7 +47,7 @@ def verificar_acceso():
         st.markdown("Por favor, ingrese sus credenciales corporativas para acceder al sistema.")
 
         with st.form("form_login"):
-            correo = st.text_input("Correo electrónico").strip().lower()
+            correo = st.text_input("Usuario").strip().lower()
             password = st.text_input("Contraseña", type="password")
             submit = st.form_submit_button("Ingresar", use_container_width=True)
 
