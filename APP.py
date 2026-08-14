@@ -63,7 +63,6 @@ def verificar_acceso():
                     st.error("Correo o contraseña incorrectos.")
     
     return False
-
 # ---------------------------------------------------------
 # 1. Configuración Inicial de la Página
 # ---------------------------------------------------------
