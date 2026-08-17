@@ -15,7 +15,7 @@ except ImportError:
     REPORTLAB_DISPONIBLE = False
 
 # ---------------------------------------------------------
-# 0. Sistema de Autenticación de Usuarios (Actualizado con Proveedores)
+# 0. Sistema de Autenticación de Usuarios
 # ---------------------------------------------------------
 USUARIOS_PERMITIDOS = {
     "kenneth.martinez@sedisur.com": {"password": "Kem000", "cargo": "Gerencia", "rol": "Usuario"},
@@ -66,7 +66,6 @@ def verificar_acceso():
                     st.session_state["cargo_actual"] = USUARIOS_PERMITIDOS[correo]["cargo"]
                     st.session_state["rol_actual"] = USUARIOS_PERMITIDOS[correo]["rol"]
                     
-                    # Guardar marca restringida si aplica
                     if USUARIOS_PERMITIDOS[correo]["rol"] == "proveedor_marca":
                         st.session_state["marca_restringida"] = USUARIOS_PERMITIDOS[correo]["marca_restringida"]
                     else:
@@ -83,7 +82,7 @@ def verificar_acceso():
 # 1. Configuración Inicial de la Página
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="Sedisur BI",
+    page_title="Sedisur BI - Comparativa y Cobertura",
     page_icon="Sedisur_logo.png",
     layout="wide"
 )
@@ -308,7 +307,6 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
 
     story.append(Spacer(1, 8))
 
-    # Si es proveedor restringido, solo exportar su marca
     marca_rest = st.session_state.get("marca_restringida")
     if marca_rest:
         proveedores_principales = [marca_rest]
@@ -372,7 +370,7 @@ def generar_pdf_manual_operaciones():
     except FileNotFoundError:
         return None
 
-def mostrar_vista_comparativa(df: pd.DataFrame):
+def mostrar_vista_comparativa(df: pd.DataFrame, df_raw_completo: pd.DataFrame):
     st.header("📈 Comparativa de Ventas Año contra Año")
 
     if df.empty:
@@ -382,9 +380,8 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     marca_restriccion = st.session_state.get("marca_restringida")
 
     if marca_restriccion:
-        # Si es proveedor, solo ve su marca asignada
         lista_vistas = [f"Proveedor: {marca_restriccion}"]
-        st.info(f"🔒 **Modo Proveedor Activo:** Visualizando únicamente los datos correspondientes a **{marca_restriccion}**.")
+        st.info(f"🔒 **Modo Proveedor Activo:** Visualizando únicamente los datos correspondientes à **{marca_restriccion}**.")
     else:
         orden_personalizado = [
             'COLGATE_PALM', 'ESSITY', 'PEPSICO', 'HEINZ.CR', 'ALIMER S.A.',
@@ -547,13 +544,16 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     if REPORTLAB_DISPONIBLE:
         pdf_buffer_global = generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig)
 
-    # Si es proveedor, omitimos las tablas de sub-marcas de otros
-    if not marca_restriccion:
-        st.divider()
-        st.header("🏢 Comparativa por Proveedores y Sub-Marcas")
+    st.divider()
+    st.header("🏢 Comparativa por Proveedores y Sub-Marcas")
 
+    if marca_restriccion:
+        df_base_proveedor = df_raw_completo[df_raw_completo['CLASIFICACION_1'].str.strip() == marca_restriccion]
+        generar_tabla_comparativa_formateada(df_base_proveedor, 'CLASIFICACION_1', f'Resumen ({marca_restriccion})')
+        st.markdown("---")
+        generar_tabla_comparativa_formateada(df_base_proveedor, 'CLASIFICACION_2', f"Clasificación de: {marca_restriccion}")
+    else:
         generar_tabla_comparativa_formateada(df_analisis, 'CLASIFICACION_1', f'Resumen ({seleccion_actual})')
-
         st.markdown("---")
 
         proveedores_excluidos = [
@@ -587,7 +587,6 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
 # ---------------------------------------------------------
 def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list, df_filtrado: pd.DataFrame):
     st.header("🎯 Análisis de Cobertura 80/20 y Oportunidades de Alcance")
-    st.markdown("Utiliza el panel superior para configurar el **Filtro A** y múltiples marcas en el **Filtro B** para evaluar la cobertura y brechas.")
 
     marca_restriccion = st.session_state.get("marca_restringida")
     if marca_restriccion:
@@ -595,11 +594,11 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
         st.info(f"🔒 **Modo Proveedor Activo:** Analizando cobertura exclusivamente para **{marca_restriccion}**.")
 
     if not filtro_a:
-        st.info("👆 Por favor, seleccione una opción en el **Filtro A (Referencia 80/20)** en el panel superior para calcular el Pareto.")
+        st.info("👆 Por favor, seleccione una opción en el **Filtro A (Referencia 80/20)** en el segundo panel para calcular el Pareto.")
         return
 
     if df_filtrado.empty:
-        st.warning("No hay datos disponibles con los filtros seleccionados en el panel.")
+        st.warning("No hay datos disponibles con los filtros seleccionados.")
         return
 
     if filtro_a == "TODOS (Consolidado Sedisur)":
@@ -611,6 +610,7 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
         st.warning("No se encontraron registros para la referencia seleccionada en el Filtro A con los filtros actuales.")
         return
 
+    # A. Cálculo del Promedio Mensual (Este SÍ respeta el periodo de tiempo seleccionado en los filtros)
     df_mensual_cliente = df_ref_a.groupby(['CLIENTE', 'ALIAS', 'CATEGORIA_CLIENTE', 'ANIO', 'MES_NUM'], as_index=False).agg(
         VENTA_MES=('VENTA_NETA', 'sum')
     )
@@ -637,18 +637,25 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
         df_clientes['PORCENTAJE_INDIVIDUAL'] = (df_clientes['VENTA_PROMEDIO_A'] / venta_total_promedio_acumulada) * 100
         df_clientes['PORCENTAJE_ACUMULADO'] = df_clientes['PORCENTAJE_INDIVIDUAL'].cumsum()
 
-    if not df_ref_a.empty and 'ANIO' in df_ref_a.columns and 'MES_NUM' in df_ref_a.columns:
-        max_anio = df_ref_a['ANIO'].max()
-        df_mes_actual_ref = df_ref_a[(df_ref_a['ANIO'] == max_anio)]
-        if not df_mes_actual_ref.empty:
-            max_mes = df_mes_actual_ref['MES_NUM'].max()
-            df_mes_actual_ref = df_mes_actual_ref[df_mes_actual_ref['MES_NUM'] == max_mes]
-            
-            df_venta_mes_actual = df_mes_actual_ref.groupby('CLIENTE', as_index=False).agg(
-                VENTA_MES_ACTUAL=('VENTA_NETA', 'sum')
-            )
-        else:
-            df_venta_mes_actual = pd.DataFrame(columns=['CLIENTE', 'VENTA_MES_ACTUAL'])
+    # B. Cálculo de la Venta del Mes Actual (Independiente del multiselect de meses)
+    # Se evalúa directamente sobre la base global filtrada por el Proveedor/Referencia A, tomando siempre el mes en curso (Agosto 2026)
+    mes_actual_num = 8  # 8 corresponde a Agosto
+    anio_actual_valor = 2026
+
+    if filtro_a == "TODOS (Consolidado Sedisur)":
+        df_base_actual = df_raw.copy()
+    else:
+        df_base_actual = df_raw[df_raw['CLASIFICACION_1'] == filtro_a]
+
+    df_mes_actual_ref = df_base_actual[
+        (df_base_actual['ANIO'] == anio_actual_valor) & 
+        (df_base_actual['MES_NUM'] == mes_actual_num)
+    ]
+
+    if not df_mes_actual_ref.empty:
+        df_venta_mes_actual = df_mes_actual_ref.groupby('CLIENTE', as_index=False).agg(
+            VENTA_MES_ACTUAL=('VENTA_NETA', 'sum')
+        )
     else:
         df_venta_mes_actual = pd.DataFrame(columns=['CLIENTE', 'VENTA_MES_ACTUAL'])
 
@@ -711,7 +718,8 @@ if verificar_acceso():
     else:
         df_raw['CANAL'] = 'OTROS'
 
-    # Aplicar restricción global si el usuario es proveedor
+    df_raw_completo = df_raw.copy()
+
     marca_restriccion = st.session_state.get("marca_restringida")
     if marca_restriccion:
         df_raw = df_raw[df_raw['CLASIFICACION_1'].str.strip() == marca_restriccion]
@@ -787,7 +795,7 @@ if verificar_acceso():
         with st.expander("🔍 **Panel de Filtros Comerciales (Comparativa)**", expanded=True):
             col_btn_desc, col_space = st.columns([1.2, 5.8])
 
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             
             with col1:
                 anios_disponibles = sorted(df_raw['ANIO'].unique(), reverse=True)
@@ -798,22 +806,40 @@ if verificar_acceso():
                 sel_meses = st.multiselect("Mes", meses_disponibles, key="filtro_meses")
 
             with col2:
-                if marca_restriccion:
-                    st.selectbox("Clasificación 1 (Marca)", options=[marca_restriccion], disabled=True, key="filtro_marcas_bloqueado")
-                    sel_marcas = [marca_restriccion]
-                else:
-                    marcas = sorted(df_raw['CLASIFICACION_1'].dropna().unique())
-                    sel_marcas = st.multiselect("Clasificación 1 (Marca)", marcas, key="filtro_marcas")
-                
+                filtro_canal_sel = st.selectbox("Canal", lista_canales, key="filtro_canal_comp")
                 categorias = sorted(df_raw['CATEGORIA_CLIENTE'].dropna().unique())
                 sel_cats = st.multiselect("Categoría Cliente", categorias, key="filtro_cats")
 
             with col3:
-                filtro_canal_sel = st.selectbox("Canal", lista_canales, key="filtro_canal_comp")
                 vendedores = sorted(df_raw['VENDEDOR'].dropna().unique())
                 sel_vendedores = st.multiselect("Vendedor", vendedores, key="filtro_vendedores")
+                sel_clientes = st.multiselect("Cliente (Código y Alias)", options=opciones_clientes, format_func=format_func_cliente, key="filtro_clientes_comp")
 
-            sel_clientes = st.multiselect("Cliente (Código y Alias)", options=opciones_clientes, format_func=format_func_cliente, key="filtro_clientes_comp")
+            with col4:
+                if marca_restriccion:
+                    st.selectbox("Proveedor (Clasif. 1)", options=[marca_restriccion], disabled=True, key="filtro_proveedor_bloqueado")
+                    sel_proveedores = [marca_restriccion]
+                else:
+                    proveedores = sorted(df_raw['CLASIFICACION_1'].dropna().unique())
+                    sel_proveedores = st.multiselect("Proveedor (Clasif. 1)", proveedores, key="filtro_proveedores")
+                
+                df_cascada_c2 = df_raw if not sel_proveedores else df_raw[df_raw['CLASIFICACION_1'].isin(sel_proveedores)]
+                clasificaciones = sorted(df_cascada_c2['CLASIFICACION_2'].dropna().unique())
+                sel_clasificaciones = st.multiselect("Clasificación (Clasif. 2)", clasificaciones, key="filtro_clasificaciones")
+
+                df_cascada_c3 = df_cascada_c2
+                if sel_clasificaciones:
+                    df_cascada_c3 = df_cascada_c3[df_cascada_c3['CLASIFICACION_2'].isin(sel_clasificaciones)]
+                
+                marcas = sorted(df_cascada_c3['CLASIFICACION_3'].dropna().unique()) if 'CLASIFICACION_3' in df_cascada_c3.columns else []
+                sel_marcas_prod = st.multiselect("Marca (Clasif. 3)", marcas, key="filtro_marcas_prod")
+
+                df_cascada_c4 = df_cascada_c3
+                if sel_marcas_prod and 'CLASIFICACION_3' in df_cascada_c4.columns:
+                    df_cascada_c4 = df_cascada_c4[df_cascada_c4['CLASIFICACION_3'].isin(sel_marcas_prod)]
+
+                tipos_producto = sorted(df_cascada_c4['CLASIFICACION_4'].dropna().unique()) if 'CLASIFICACION_4' in df_cascada_c4.columns else []
+                sel_tipos_prod = st.multiselect("Tipo de producto (Clasif. 4)", tipos_producto, key="filtro_tipos_prod")
 
         df_raw_global = df_raw.copy()
         if filtro_canal_sel != 'TODOS':
@@ -824,8 +850,14 @@ if verificar_acceso():
             df_filt = df_filt[df_filt['ANIO'].isin(sel_anios)]
         if sel_meses:
             df_filt = df_filt[df_filt['MES_NOMBRE'].isin(sel_meses)]
-        if sel_marcas and not marca_restriccion:
-            df_filt = df_filt[df_filt['CLASIFICACION_1'].isin(sel_marcas)]
+        if sel_proveedores and not marca_restriccion:
+            df_filt = df_filt[df_filt['CLASIFICACION_1'].isin(sel_proveedores)]
+        if sel_clasificaciones:
+            df_filt = df_filt[df_filt['CLASIFICACION_2'].isin(sel_clasificaciones)]
+        if sel_marcas_prod and 'CLASIFICACION_3' in df_filt.columns:
+            df_filt = df_filt[df_filt['CLASIFICACION_3'].isin(sel_marcas_prod)]
+        if sel_tipos_prod and 'CLASIFICACION_4' in df_filt.columns:
+            df_filt = df_filt[df_filt['CLASIFICACION_4'].isin(sel_tipos_prod)]
         if sel_cats:
             df_filt = df_filt[df_filt['CATEGORIA_CLIENTE'].isin(sel_cats)]
         if sel_vendedores:
@@ -833,7 +865,7 @@ if verificar_acceso():
         if sel_clientes:
             df_filt = df_filt[df_filt['CLIENTE'].isin(sel_clientes)]
 
-        pdf_buffer_generado = mostrar_vista_comparativa(df_filt)
+        pdf_buffer_generado = mostrar_vista_comparativa(df_filt, df_raw_completo)
 
         with col_btn_desc:
             if REPORTLAB_DISPONIBLE and pdf_buffer_generado:
@@ -847,50 +879,113 @@ if verificar_acceso():
                 )
 
     elif st.session_state["vista_activa"] == "cobertura":
-        with st.expander("🔍 **Panel de Filtros Comerciales (Cobertura 80/20)**", expanded=True):
+        # --- PANEL 1: Filtros Generales de Contexto ---
+        with st.expander("🔍 **Panel 1: Filtros Generales (Año, Mes, Vendedor y Categoría Cliente)**", expanded=True):
+            col_g1, col_g2, col_g3, col_g4 = st.columns(4)
+            
+            with col_g1:
+                anios_disponibles = sorted(df_raw['ANIO'].unique(), reverse=True)
+                sel_anios_cob = st.multiselect("Año", anios_disponibles, key="filtro_anios_cob")
+                
+            with col_g2:
+                meses_disponibles = [m for m in ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
+                                                 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'] if m in df_raw['MES_NOMBRE'].unique()]
+                sel_meses_cob = st.multiselect("Mes", meses_disponibles, key="filtro_meses_cob")
+
+            with col_g3:
+                vendedores_disponibles = sorted(df_raw['VENDEDOR'].dropna().unique())
+                sel_vendedores_cob = st.multiselect("Vendedor", vendedores_disponibles, key="filtro_vendedores_cob")
+
+            with col_g4:
+                categorias = sorted(df_raw['CATEGORIA_CLIENTE'].dropna().unique())
+                sel_cats_cob = st.multiselect("Categoría Cliente", categorias, key="filtro_cats_cob")
+
+        # --- PANEL 2: Filtros Comerciales (Filtro A vs Filtro B con Cascada Independiente) - AHORA RETRAÍDO ---
+        with st.expander("🔍 **Panel 2: Filtros Comerciales (Filtro A y Filtro B Escalonados)**", expanded=False):
             marcas_disponibles = sorted(df_raw['CLASIFICACION_1'].dropna().unique())
             
             if marca_restriccion:
                 opciones_filtro_a = [marca_restriccion]
             else:
                 opciones_filtro_a = ["TODOS (Consolidado Sedisur)"] + list(marcas_disponibles)
-                
-            vendedores_disponibles = sorted(df_raw['VENDEDOR'].dropna().unique())
 
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
+            col_a, col_b = st.columns(2)
+
+            # --- BLOQUE FILTRO A ---
+            with col_a:
+                st.markdown("### 📌 Filtro A (Referencia 80/20)")
                 if marca_restriccion:
-                    st.selectbox("📌 Filtro A (Referencia 80/20)", options=[marca_restriccion], disabled=True, key="filtro_a_cob_bloq")
+                    st.selectbox("Proveedor Principal (Clasif. 1)", options=[marca_restriccion], disabled=True, key="filtro_a_cob_bloq")
                     filtro_a = marca_restriccion
-                    filtros_b = []
                 else:
-                    filtro_a = st.selectbox("📌 Filtro A (Referencia 80/20)", options=opciones_filtro_a, key="filtro_a_cob")
-                    filtros_b = st.multiselect("🔍 Filtro B (Comparativo de Colocación)", options=marcas_disponibles, key="filtro_b_cob")
+                    filtro_a = st.selectbox("Proveedor Principal (Clasif. 1)", options=opciones_filtro_a, key="filtro_a_cob")
 
-            with col2:
-                anios_disponibles = sorted(df_raw['ANIO'].unique(), reverse=True)
-                sel_anios_cob = st.multiselect("Año", anios_disponibles, key="filtro_anios_cob")
+                # Cascada Filtro A
+                df_cascada_a = df_raw if (filtro_a == "TODOS (Consolidado Sedisur)" or not filtro_a) else df_raw[df_raw['CLASIFICACION_1'] == filtro_a]
                 
-                meses_disponibles = [m for m in ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
-                                                 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'] if m in df_raw['MES_NOMBRE'].unique()]
-                sel_meses_cob = st.multiselect("Mes", meses_disponibles, key="filtro_meses_cob")
+                clasificaciones_a = sorted(df_cascada_a['CLASIFICACION_2'].dropna().unique())
+                sel_clasificaciones_a = st.multiselect("Clasificación (Clasif. 2) - A", clasificaciones_a, key="filtro_clasificaciones_a")
 
-            with col3:
-                sel_vendedores_cob = st.multiselect("Vendedor", vendedores_disponibles, key="filtro_vendedores_cob")
-                categorias = sorted(df_raw['CATEGORIA_CLIENTE'].dropna().unique())
-                sel_cats_cob = st.multiselect("Categoría Cliente", categorias, key="filtro_cats_cob")
+                df_cascada_a_c3 = df_cascada_a
+                if sel_clasificaciones_a:
+                    df_cascada_a_c3 = df_cascada_a_c3[df_cascada_a_c3['CLASIFICACION_2'].isin(sel_clasificaciones_a)]
 
-        df_raw_global_cob = df_raw.copy()
+                marcas_a = sorted(df_cascada_a_c3['CLASIFICACION_3'].dropna().unique()) if 'CLASIFICACION_3' in df_cascada_a_c3.columns else []
+                sel_marcas_a = st.multiselect("Marca (Clasif. 3) - A", marcas_a, key="filtro_marcas_a")
 
-        df_filt_cob = df_raw_global_cob.copy()
+                df_cascada_a_c4 = df_cascada_a_c3
+                if sel_marcas_a and 'CLASIFICACION_3' in df_cascada_a_c4.columns:
+                    df_cascada_a_c4 = df_cascada_a_c4[df_cascada_a_c4['CLASIFICACION_3'].isin(sel_marcas_a)]
+
+                tipos_prod_a = sorted(df_cascada_a_c4['CLASIFICACION_4'].dropna().unique()) if 'CLASIFICACION_4' in df_cascada_a_c4.columns else []
+                sel_tipos_prod_a = st.multiselect("Tipo de producto (Clasif. 4) - A", tipos_prod_a, key="filtro_tipos_prod_a")
+
+            # --- BLOQUE FILTRO B ---
+            with col_b:
+                st.markdown("### 🔍 Filtro B (Comparativo de Colocación)")
+                if marca_restriccion:
+                    st.info("🔒 Bloque B no disponible en modo proveedor restringido.")
+                    filtros_b = []
+                    sel_clasificaciones_b, sel_marcas_b, sel_tipos_prod_b = [], [], []
+                else:
+                    filtros_b = st.multiselect("Proveedores a Comparar (Clasif. 1)", options=marcas_disponibles, key="filtro_b_cob")
+
+                    df_cascada_b = df_raw if not filtros_b else df_raw[df_raw['CLASIFICACION_1'].isin(filtros_b)]
+
+                    clasificaciones_b = sorted(df_cascada_b['CLASIFICACION_2'].dropna().unique())
+                    sel_clasificaciones_b = st.multiselect("Clasificación (Clasif. 2) - B", clasificaciones_b, key="filtro_clasificaciones_b")
+
+                    df_cascada_b_c3 = df_cascada_b
+                    if sel_clasificaciones_b:
+                        df_cascada_b_c3 = df_cascada_b_c3[df_cascada_b_c3['CLASIFICACION_2'].isin(sel_clasificaciones_b)]
+
+                    marcas_b = sorted(df_cascada_b_c3['CLASIFICACION_3'].dropna().unique()) if 'CLASIFICACION_3' in df_cascada_b_c3.columns else []
+                    sel_marcas_b = st.multiselect("Marca (Clasif. 3) - B", marcas_b, key="filtro_marcas_b")
+
+                    df_cascada_b_c4 = df_cascada_b_c3
+                    if sel_marcas_b and 'CLASIFICACION_3' in df_cascada_b_c4.columns:
+                        df_cascada_b_c4 = df_cascada_b_c4[df_cascada_b_c4['CLASIFICACION_3'].isin(sel_marcas_b)]
+
+                    tipos_prod_b = sorted(df_cascada_b_c4['CLASIFICACION_4'].dropna().unique()) if 'CLASIFICACION_4' in df_cascada_b_c4.columns else []
+                    sel_tipos_prod_b = st.multiselect("Tipo de producto (Clasif. 4) - B", tipos_prod_b, key="filtro_tipos_prod_b")
+
+        # Aplicación de Filtros Generales y de Referencia (Filtro A)
+        df_filt_cob = df_raw.copy()
         if sel_anios_cob:
             df_filt_cob = df_filt_cob[df_filt_cob['ANIO'].isin(sel_anios_cob)]
         if sel_meses_cob:
             df_filt_cob = df_filt_cob[df_filt_cob['MES_NOMBRE'].isin(sel_meses_cob)]
-        if sel_cats_cob:
-            df_filt_cob = df_filt_cob[df_filt_cob['CATEGORIA_CLIENTE'].isin(sel_cats_cob)]
         if sel_vendedores_cob:
             df_filt_cob = df_filt_cob[df_filt_cob['VENDEDOR'].isin(sel_vendedores_cob)]
+        if sel_cats_cob:
+            df_filt_cob = df_filt_cob[df_filt_cob['CATEGORIA_CLIENTE'].isin(sel_cats_cob)]
 
-        mostrar_vista_cobertura_8020(df_raw_global_cob, filtro_a, filtros_b, df_filt_cob)
+        # Filtros escalonados aplicados a la referencia A
+        if sel_clasificaciones_a:
+            df_filt_cob = df_filt_cob[df_filt_cob['CLASIFICACION_2'].isin(sel_clasificaciones_a)]
+        if sel_marcas_a and 'CLASIFICACION_3' in df_filt_cob.columns:
+            df_filt_cob = df_filt_cob[df_filt_cob['CLASIFICACION_3'].isin(sel_marcas_a)]
+        if sel_tipos_prod_a and 'CLASIFICACION_4' in df_filt_cob.columns:
+            df_filt_cob = df_filt_cob[df_filt_cob['CLASIFICACION_4'].isin(sel_tipos_prod_a)]
+
+        mostrar_vista_cobertura_8020(df_raw, filtro_a, filtros_b, df_filt_cob)
