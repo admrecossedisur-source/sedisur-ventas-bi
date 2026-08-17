@@ -57,7 +57,7 @@ def verificar_acceso():
         with st.form("form_login"):
             correo = st.text_input("Usuario").strip().lower()
             password = st.text_input("Contraseña", type="password")
-            submit = st.form_submit_button("Ingresar", use_container_width=True)
+            submit = st.form_submit_button("Ingresar", width='stretch')
 
             if submit:
                 if correo in USUARIOS_PERMITIDOS and USUARIOS_PERMITIDOS[correo]["password"] == password:
@@ -215,7 +215,7 @@ def generar_tabla_comparativa_formateada(df_sub: pd.DataFrame, col_group: str, t
     st.subheader(f"🏷️ {titulo}")
     st.dataframe(
         styler,
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
         height=(len(res_completo) + 1) * 35 + 5
     )
@@ -381,7 +381,7 @@ def mostrar_vista_comparativa(df: pd.DataFrame, df_raw_completo: pd.DataFrame):
 
     if marca_restriccion:
         lista_vistas = [f"Proveedor: {marca_restriccion}"]
-        st.info(f"🔒 **Modo Proveedor Activo:** Visualizando únicamente los datos correspondientes à **{marca_restriccion}**.")
+        st.info(f"🔒 **Modo Proveedor Activo:** Visualizando únicamente los datos correspondientes a **{marca_restriccion}**.")
     else:
         orden_personalizado = [
             'COLGATE_PALM', 'ESSITY', 'PEPSICO', 'HEINZ.CR', 'ALIMER S.A.',
@@ -406,17 +406,17 @@ def mostrar_vista_comparativa(df: pd.DataFrame, df_raw_completo: pd.DataFrame):
         col_info, col_btn_izq, col_btn_sedisur, col_btn_der = st.columns([4, 1.2, 1.2, 1.2])
 
         with col_btn_izq:
-            if st.button("◀ Anterior", use_container_width=True):
+            if st.button("◀ Anterior", width='stretch'):
                 st.session_state["indice_vista_prov"] = (st.session_state["indice_vista_prov"] - 1) % len(lista_vistas)
                 st.rerun()
 
         with col_btn_sedisur:
-            if st.button("🏢 Sedisur", use_container_width=True):
+            if st.button("🏢 Sedisur", width='stretch'):
                 st.session_state["indice_vista_prov"] = 0
                 st.rerun()
 
         with col_btn_der:
-            if st.button("Siguiente ▶", use_container_width=True):
+            if st.button("Siguiente ▶", width='stretch'):
                 st.session_state["indice_vista_prov"] = (st.session_state["indice_vista_prov"] + 1) % len(lista_vistas)
                 st.rerun()
     else:
@@ -492,7 +492,7 @@ def mostrar_vista_comparativa(df: pd.DataFrame, df_raw_completo: pd.DataFrame):
     
     st.dataframe(
         styler, 
-        use_container_width=True, 
+        width='stretch', 
         hide_index=True,
         height=(len(df_resultado) + 1) * 35 + 3
     )
@@ -538,7 +538,7 @@ def mostrar_vista_comparativa(df: pd.DataFrame, df_raw_completo: pd.DataFrame):
         fig.update_traces(hovertemplate="<b>%{x}</b><br>Métrica: %{y:,.0f}<extra></extra>")
 
     fig.update_layout(height=450, hovermode="x unified")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
     pdf_buffer_global = None
     if REPORTLAB_DISPONIBLE:
@@ -692,22 +692,14 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
             df_tabla_final[nombre_col_colocacion] = df_tabla_final['VENTA_TOTAL_B'].apply(lambda x: "✅" if x > 0 else "❌")
             df_tabla_final = df_tabla_final.drop(columns=['VENTA_TOTAL_B'])
 
-    def resaltar_8020(row):
-        styles = [''] * len(row)
-        try:
-            idx_porc = row.index.get_loc('% Individual')
-            if df_clientes.loc[row.name, 'PORCENTAJE_ACUMULADO'] <= 80.0:
-                styles[idx_porc] = 'color: #2e7d32; font-weight: bold;'
-        except Exception:
-            pass
-        return styles
-
+    # Implementación más limpia y ligera para el renderizado del dataframe sin colapsar memoria
     df_mostrar = df_tabla_final.drop(columns=['CLIENTE', '% Acumulado'])
-    styler_8020 = df_mostrar.style.apply(resaltar_8020, axis=1)
+    df_mostrar['¿Es 80/20?'] = ['🟢 Sí' if acum <= 80.0 else '⚪ No' for acum in df_clientes['PORCENTAJE_ACUMULADO']]
 
     titulo_b_str = f" vs ({', '.join(filtros_b)})" if (filtros_b and not marca_restriccion) else ""
     st.subheader(f"📊 Matriz de Cobertura para: {filtro_a}{titulo_b_str}")
-    st.dataframe(styler_8020, use_container_width=True, hide_index=True)
+    st.dataframe(df_mostrar, width='stretch', hide_index=True)
+
 # ---------------------------------------------------------
 # 6. Flujo Principal de Ejecución
 # ---------------------------------------------------------
@@ -735,7 +727,7 @@ if verificar_acceso():
 
     with st.sidebar:
         try:
-            st.image("Sedisur_logo.png", use_container_width=True)
+            st.image("Sedisur_logo.png", width='stretch')
         except Exception:
             st.markdown("### **Sedisur S.A.**")
 
@@ -748,23 +740,23 @@ if verificar_acceso():
 
         st.markdown("---")
         
-        if st.button("🔄 Recargar Datos", use_container_width=True, help="Limpia la caché y recarga los datos"):
+        if st.button("🔄 Recargar Datos", width='stretch', help="Limpia la caché y recarga los datos"):
             cargar_datos_exactus.clear()
             cargar_datos_canales.clear()
             st.toast("¡Datos recargados correctamente!", icon="✅")
             st.rerun()
 
-        if st.button("Cerrar Sesión", use_container_width=True):
+        if st.button("Cerrar Sesión", width='stretch'):
             st.session_state["autenticado"] = False
             st.rerun()
         st.divider()
 
         st.markdown("### 🧭 Menú Principal")
-        if st.button("📈 Comparativa de ventas", use_container_width=True):
+        if st.button("📈 Comparativa de ventas", width='stretch'):
             st.session_state["vista_activa"] = "comparativa"
             st.rerun()
 
-        if st.button("🎯 Cobertura 8020", use_container_width=True):
+        if st.button("🎯 Cobertura 8020", width='stretch'):
             st.session_state["vista_activa"] = "cobertura"
             st.rerun()
 
@@ -777,7 +769,7 @@ if verificar_acceso():
                 data=pdf_manual_bytes,
                 file_name="Manual_Operaciones_Sedisur.pdf",
                 mime="application/pdf",
-                use_container_width=True,
+                width='stretch',
                 help="Descargar tu manual de operaciones en PDF"
             )
         else:
@@ -880,7 +872,7 @@ if verificar_acceso():
                     data=pdf_buffer_generado,
                     file_name="Informe_Sedisur_Ejecutivo.pdf",
                     mime="application/pdf",
-                    use_container_width=True,
+                    width='stretch',
                     help="Descargar informe PDF completo con tablas y gráficos"
                 )
 
