@@ -610,7 +610,7 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
         st.warning("No se encontraron registros para la referencia seleccionada en el Filtro A con los filtros actuales.")
         return
 
-    # A. Cálculo del Promedio Mensual (Este SÍ respeta el periodo de tiempo seleccionado en los filtros)
+    # A. Cálculo del Promedio Mensual
     df_mensual_cliente = df_ref_a.groupby(['CLIENTE', 'ALIAS', 'CATEGORIA_CLIENTE', 'ANIO', 'MES_NUM'], as_index=False).agg(
         VENTA_MES=('VENTA_NETA', 'sum')
     )
@@ -625,6 +625,7 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
     ).sort_values(by='VENTA_PROMEDIO_A', ascending=False).reset_index(drop=True)
 
     if df_clientes.empty:
+        st.warning("No se pudieron agrupar los clientes para esta selección.")
         return
 
     df_clientes['Posición'] = df_clientes.index + 1
@@ -637,9 +638,8 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
         df_clientes['PORCENTAJE_INDIVIDUAL'] = (df_clientes['VENTA_PROMEDIO_A'] / venta_total_promedio_acumulada) * 100
         df_clientes['PORCENTAJE_ACUMULADO'] = df_clientes['PORCENTAJE_INDIVIDUAL'].cumsum()
 
-    # B. Cálculo de la Venta del Mes Actual (Independiente del multiselect de meses)
-    # Se evalúa directamente sobre la base global filtrada por el Proveedor/Referencia A, tomando siempre el mes en curso (Agosto 2026)
-    mes_actual_num = 8  # 8 corresponde a Agosto
+    # B. Cálculo de la Venta del Mes Actual (Agosto 2026)
+    mes_actual_num = 8
     anio_actual_valor = 2026
 
     if filtro_a == "TODOS (Consolidado Sedisur)":
@@ -662,6 +662,7 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
     df_clientes = df_clientes.merge(df_venta_mes_actual, on='CLIENTE', how='left')
     df_clientes['VENTA_MES_ACTUAL'] = df_clientes['VENTA_MES_ACTUAL'].fillna(0)
 
+    # Construcción de la tabla final asegurando nombres de columnas limpios
     df_tabla_final = pd.DataFrame()
     df_tabla_final['Posición'] = df_clientes['Posición']
     df_tabla_final['CLIENTE'] = df_clientes['CLIENTE']
@@ -677,9 +678,12 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
     if filtros_b and not marca_restriccion:
         for prov_b in filtros_b:
             df_ref_b = df_filtrado[df_filtrado['CLASIFICACION_1'] == prov_b]
-            df_clientes_b = df_ref_b.groupby('CLIENTE', as_index=False).agg(
-                VENTA_TOTAL_B=('VENTA_NETA', 'sum')
-            )
+            if not df_ref_b.empty:
+                df_clientes_b = df_ref_b.groupby('CLIENTE', as_index=False).agg(
+                    VENTA_TOTAL_B=('VENTA_NETA', 'sum')
+                )
+            else:
+                df_clientes_b = pd.DataFrame(columns=['CLIENTE', 'VENTA_TOTAL_B'])
 
             df_tabla_final = df_tabla_final.merge(df_clientes_b, on='CLIENTE', how='left')
             df_tabla_final['VENTA_TOTAL_B'] = df_tabla_final['VENTA_TOTAL_B'].fillna(0)
@@ -690,9 +694,12 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
 
     def resaltar_8020(row):
         styles = [''] * len(row)
-        idx_porc = row.index.get_loc('% Individual')
-        if df_clientes.loc[row.name, 'PORCENTAJE_ACUMULADO'] <= 80.0:
-            styles[idx_porc] = 'color: #2e7d32; font-weight: bold;'
+        try:
+            idx_porc = row.index.get_loc('% Individual')
+            if df_clientes.loc[row.name, 'PORCENTAJE_ACUMULADO'] <= 80.0:
+                styles[idx_porc] = 'color: #2e7d32; font-weight: bold;'
+        except Exception:
+            pass
         return styles
 
     df_mostrar = df_tabla_final.drop(columns=['CLIENTE', '% Acumulado'])
@@ -701,7 +708,6 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
     titulo_b_str = f" vs ({', '.join(filtros_b)})" if (filtros_b and not marca_restriccion) else ""
     st.subheader(f"📊 Matriz de Cobertura para: {filtro_a}{titulo_b_str}")
     st.dataframe(styler_8020, use_container_width=True, hide_index=True)
-
 # ---------------------------------------------------------
 # 6. Flujo Principal de Ejecución
 # ---------------------------------------------------------
