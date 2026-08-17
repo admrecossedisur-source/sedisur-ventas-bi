@@ -583,8 +583,38 @@ def mostrar_vista_comparativa(df: pd.DataFrame, df_raw_completo: pd.DataFrame):
     return pdf_buffer_global
 
 # ---------------------------------------------------------
-# 5. Vista Cobertura 8020
+# 5. Vista Cobertura 8020 (Optimizado con Caché)
 # ---------------------------------------------------------
+@st.cache_data(show_spinner=False)
+def procesar_cobertura_optimizado(df_ref_a):
+    if df_ref_a.empty:
+        return pd.DataFrame()
+
+    df_mensual_cliente = df_ref_a.groupby(['CLIENTE', 'ALIAS', 'CATEGORIA_CLIENTE', 'ANIO', 'MES_NUM'], as_index=False).agg(
+        VENTA_MES=('VENTA_NETA', 'sum')
+    )
+
+    if df_mensual_cliente.empty:
+        return pd.DataFrame()
+
+    df_clientes = df_mensual_cliente.groupby(['CLIENTE', 'ALIAS', 'CATEGORIA_CLIENTE'], as_index=False).agg(
+        VENTA_TOTAL_A=('VENTA_MES', 'sum'),
+        VENTA_PROMEDIO_A=('VENTA_MES', 'mean')
+    ).sort_values(by='VENTA_PROMEDIO_A', ascending=False).reset_index(drop=True)
+
+    if df_clientes.empty:
+        return pd.DataFrame()
+
+    venta_total_promedio_acumulada = df_clientes['VENTA_PROMEDIO_A'].sum()
+    if venta_total_promedio_acumulada > 0:
+        df_clientes['PORCENTAJE_INDIVIDUAL'] = (df_clientes['VENTA_PROMEDIO_A'] / venta_total_promedio_acumulada) * 100
+        df_clientes['PORCENTAJE_ACUMULADO'] = df_clientes['PORCENTAJE_INDIVIDUAL'].cumsum()
+    else:
+        df_clientes['PORCENTAJE_INDIVIDUAL'] = 0.0
+        df_clientes['PORCENTAJE_ACUMULADO'] = 0.0
+
+    return df_clientes
+
 def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list, df_filtrado: pd.DataFrame):
     st.header("🎯 Análisis de Cobertura 80/20 y Oportunidades de Alcance")
 
@@ -594,7 +624,7 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
         st.info(f"🔒 **Modo Proveedor Activo:** Analizando cobertura exclusivamente para **{marca_restriccion}**.")
 
     if not filtro_a:
-        st.info("👆 Por favor, seleccione una opción en el **Filtro A (Referencia 80/20)** en el segundo panel para calcular el Pareto.")
+        st.info("👆 Por favor, seleccione una opción en el **Filtro A (Referencia 80/20)** para calcular el Pareto.")
         return
 
     if df_filtrado.empty:
@@ -602,103 +632,42 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
         return
 
     if filtro_a == "TODOS (Consolidado Sedisur)":
-        df_ref_a = df_filtrado.copy()
+        df_ref_a = df_filtrado
     else:
         df_ref_a = df_filtrado[df_filtrado['CLASIFICACION_1'] == filtro_a]
 
     if df_ref_a.empty:
-        st.warning("No se encontraron registros para la referencia seleccionada en el Filtro A con los filtros actuales.")
+        st.warning("No se encontraron registros para la referencia seleccionada en el Filtro A.")
         return
 
-    # A. Cálculo del Promedio Mensual
-    df_mensual_cliente = df_ref_a.groupby(['CLIENTE', 'ALIAS', 'CATEGORIA_CLIENTE', 'ANIO', 'MES_NUM'], as_index=False).agg(
-        VENTA_MES=('VENTA_NETA', 'sum')
-    )
-
-    if df_mensual_cliente.empty:
-        st.warning("No se encontraron registros para calcular la cobertura con los filtros actuales.")
-        return
-
-    df_clientes = df_mensual_cliente.groupby(['CLIENTE', 'ALIAS', 'CATEGORIA_CLIENTE'], as_index=False).agg(
-        VENTA_TOTAL_A=('VENTA_MES', 'sum'),
-        VENTA_PROMEDIO_A=('VENTA_MES', 'mean')
-    ).sort_values(by='VENTA_PROMEDIO_A', ascending=False).reset_index(drop=True)
+    with st.spinner("Calculando matriz Pareto 80/20..."):
+        df_clientes = procesar_cobertura_optimizado(df_ref_a)
 
     if df_clientes.empty:
         st.warning("No se pudieron agrupar los clientes para esta selección.")
         return
 
-    df_clientes['Posición'] = df_clientes.index + 1
-
-    venta_total_promedio_acumulada = df_clientes['VENTA_PROMEDIO_A'].sum()
-    df_clientes['PORCENTAJE_INDIVIDUAL'] = 0.0
-    df_clientes['PORCENTAJE_ACUMULADO'] = 0.0
-
-    if venta_total_promedio_acumulada > 0:
-        df_clientes['PORCENTAJE_INDIVIDUAL'] = (df_clientes['VENTA_PROMEDIO_A'] / venta_total_promedio_acumulada) * 100
-        df_clientes['PORCENTAJE_ACUMULADO'] = df_clientes['PORCENTAJE_INDIVIDUAL'].cumsum()
-
-    # B. Cálculo de la Venta del Mes Actual (Agosto 2026)
-    mes_actual_num = 8
-    anio_actual_valor = 2026
-
-    if filtro_a == "TODOS (Consolidado Sedisur)":
-        df_base_actual = df_raw.copy()
-    else:
-        df_base_actual = df_raw[df_raw['CLASIFICACION_1'] == filtro_a]
-
-    df_mes_actual_ref = df_base_actual[
-        (df_base_actual['ANIO'] == anio_actual_valor) & 
-        (df_base_actual['MES_NUM'] == mes_actual_num)
-    ]
-
-    if not df_mes_actual_ref.empty:
-        df_venta_mes_actual = df_mes_actual_ref.groupby('CLIENTE', as_index=False).agg(
-            VENTA_MES_ACTUAL=('VENTA_NETA', 'sum')
-        )
-    else:
-        df_venta_mes_actual = pd.DataFrame(columns=['CLIENTE', 'VENTA_MES_ACTUAL'])
-
-    df_clientes = df_clientes.merge(df_venta_mes_actual, on='CLIENTE', how='left')
-    df_clientes['VENTA_MES_ACTUAL'] = df_clientes['VENTA_MES_ACTUAL'].fillna(0)
-
-    # Construcción de la tabla final asegurando nombres de columnas limpios
     df_tabla_final = pd.DataFrame()
-    df_tabla_final['Posición'] = df_clientes['Posición']
-    df_tabla_final['CLIENTE'] = df_clientes['CLIENTE']
+    df_tabla_final['Posición'] = range(1, len(df_clientes) + 1)
     df_tabla_final['Cód. Cliente'] = df_clientes['CLIENTE']
     df_tabla_final['Alias'] = df_clientes['ALIAS']
     df_tabla_final['Categoría Cliente'] = df_clientes['CATEGORIA_CLIENTE']
     df_tabla_final['% Individual'] = df_clientes['PORCENTAJE_INDIVIDUAL'].apply(lambda x: f"{x:.2f}%")
-    df_tabla_final['Venta Promedio Mensual (Filtro A)'] = df_clientes['VENTA_PROMEDIO_A'].apply(lambda x: f"₡{x:,.2f}")
-    df_tabla_final['Venta Mes Actual'] = df_clientes['VENTA_MES_ACTUAL'].apply(lambda x: f"₡{x:,.2f}")
-    df_tabla_final['% Acumulado'] = df_clientes['PORCENTAJE_ACUMULADO']
-    df_tabla_final['Cobertura Filtro A'] = "✅"
+    df_tabla_final['Venta Promedio Mensual'] = df_clientes['VENTA_PROMEDIO_A'].apply(lambda x: f"₡{x:,.2f}")
+    df_tabla_final['¿Es 80/20?'] = ['🟢 Sí' if acum <= 80.0 else '⚪ No' for acum in df_clientes['PORCENTAJE_ACUMULADO']]
 
     if filtros_b and not marca_restriccion:
         for prov_b in filtros_b:
             df_ref_b = df_filtrado[df_filtrado['CLASIFICACION_1'] == prov_b]
-            if not df_ref_b.empty:
-                df_clientes_b = df_ref_b.groupby('CLIENTE', as_index=False).agg(
-                    VENTA_TOTAL_B=('VENTA_NETA', 'sum')
-                )
-            else:
-                df_clientes_b = pd.DataFrame(columns=['CLIENTE', 'VENTA_TOTAL_B'])
-
-            df_tabla_final = df_tabla_final.merge(df_clientes_b, on='CLIENTE', how='left')
-            df_tabla_final['VENTA_TOTAL_B'] = df_tabla_final['VENTA_TOTAL_B'].fillna(0)
-            
-            nombre_col_colocacion = f"Colocación: {prov_b}"
-            df_tabla_final[nombre_col_colocacion] = df_tabla_final['VENTA_TOTAL_B'].apply(lambda x: "✅" if x > 0 else "❌")
-            df_tabla_final = df_tabla_final.drop(columns=['VENTA_TOTAL_B'])
-
-    # Implementación más limpia y ligera para el renderizado del dataframe sin colapsar memoria
-    df_mostrar = df_tabla_final.drop(columns=['CLIENTE', '% Acumulado'])
-    df_mostrar['¿Es 80/20?'] = ['🟢 Sí' if acum <= 80.0 else '⚪ No' for acum in df_clientes['PORCENTAJE_ACUMULADO']]
+            clientes_b_set = set(df_ref_b['CLIENTE'].unique()) if not df_ref_b.empty else set()
+            df_tabla_final[f"Colocación: {prov_b}"] = ["✅" if c in clientes_b_set else "❌" for c in df_clientes['CLIENTE']]
 
     titulo_b_str = f" vs ({', '.join(filtros_b)})" if (filtros_b and not marca_restriccion) else ""
     st.subheader(f"📊 Matriz de Cobertura para: {filtro_a}{titulo_b_str}")
-    st.dataframe(df_mostrar, width='stretch', hide_index=True)
+    st.caption(f"Mostrando un total de **{len(df_tabla_final):,}** clientes ordenados por relevancia.")
+    
+    # Visualización ultra liviana para la memoria de Streamlit
+    st.dataframe(df_tabla_final, width='stretch', hide_index=True)
 
 # ---------------------------------------------------------
 # 6. Flujo Principal de Ejecución
@@ -743,6 +712,7 @@ if verificar_acceso():
         if st.button("🔄 Recargar Datos", width='stretch', help="Limpia la caché y recarga los datos"):
             cargar_datos_exactus.clear()
             cargar_datos_canales.clear()
+            procesar_cobertura_optimizado.clear()
             st.toast("¡Datos recargados correctamente!", icon="✅")
             st.rerun()
 
@@ -898,7 +868,7 @@ if verificar_acceso():
                 categorias = sorted(df_raw['CATEGORIA_CLIENTE'].dropna().unique())
                 sel_cats_cob = st.multiselect("Categoría Cliente", categorias, key="filtro_cats_cob")
 
-        # --- PANEL 2: Filtros Comerciales (Filtro A vs Filtro B con Cascada Independiente) - AHORA RETRAÍDO ---
+        # --- PANEL 2: Filtros Comerciales (Filtro A vs Filtro B con Cascada Independiente) ---
         with st.expander("🔍 **Panel 2: Filtros Comerciales (Filtro A y Filtro B Escalonados)**", expanded=False):
             marcas_disponibles = sorted(df_raw['CLASIFICACION_1'].dropna().unique())
             
