@@ -26,7 +26,7 @@ USUARIOS_PERMITIDOS = {
     "eddy.zuniga@sedisur.com": {"password": "Edz000", "cargo": "Supervisión", "rol": "Usuario"},
     "cristina.nunez@sedisur.com": {"password": "Crn000", "cargo": "Supervisión", "rol": "administrador"},
     "erick.abarca@sedisur.com": {"password": "absa1528", "cargo": "Supervisión", "rol": "Usuario"},
-    "adm": {"password": "Adm1994", "cargo": "Supervisión", "rol": "administrador"}  # Corregido y validado
+    "adm": {"password": "Adm1994", "cargo": "Supervisión", "rol": "administrador"}
 }
 
 def verificar_acceso():
@@ -95,10 +95,8 @@ def cargar_datos_exactus():
 def cargar_datos_canales():
     try:
         df_canales = pd.read_excel("CLIENTES POR CANAL.xlsx")
-        # Limpiar nombres de columnas para evitar errores de espacios o mayúsculas
         df_canales.columns = [str(c).strip().upper() for c in df_canales.columns]
         
-        # Buscar la columna de cliente y de canal de forma flexible
         col_cliente = next((c for c in df_canales.columns if 'CLIENTE' in c), None)
         col_canal = next((c for c in df_canales.columns if 'CANAL' in c), None)
         
@@ -209,7 +207,7 @@ def generar_tabla_comparativa_formateada(df_sub: pd.DataFrame, col_group: str, t
     )
 
 # ---------------------------------------------------------
-# 4. Generador de PDF Completo
+# 4. Generador de PDF Completo y Manual de Operaciones
 # ---------------------------------------------------------
 def construir_datos_tabla_mensual_pdf(df_filtrado):
     pivot_base = pd.pivot_table(
@@ -342,6 +340,36 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
         story.append(Spacer(1, 8))
     except Exception:
         pass
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+def generar_pdf_manual_operaciones():
+    if not REPORTLAB_DISPONIBLE:
+        return None
+    
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+    story = []
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=16, textColor=colors.HexColor("#2f5597"), spaceAfter=10)
+    h2_style = ParagraphStyle('H2Style', parent=styles['Heading2'], fontSize=12, textColor=colors.HexColor("#4a90e2"), spaceBefore=10, spaceAfter=4)
+    body_style = ParagraphStyle('BodyStyle', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor("#333333"), spaceAfter=6, leading=12)
+
+    story.append(Paragraph("<b>Manual de Operaciones - Sedisur BI</b>", title_style))
+    story.append(Paragraph("Sistema de Business Intelligence y Análisis Comercial", body_style))
+    story.append(Spacer(1, 10))
+
+    story.append(Paragraph("1. Objetivo del Sistema", h2_style))
+    story.append(Paragraph("El sistema Sedisur BI optimiza la toma de decisiones gerenciales mediante comparativas históricas (Año contra Año), análisis de cobertura y Pareto (80/20), gestión de accesos por roles y exportación automatizada de reportes ejecutivos.", body_style))
+
+    story.append(Paragraph("2. Flujo de Trabajo y Carga de Datos", h2_style))
+    story.append(Paragraph("• <b>datos_ventas.parquet:</b> Almacena el histórico transaccional de ventas.<br/>• <b>CLIENTES POR CANAL.xlsx:</b> Archivo auxiliar que clasifica a cada cliente en su canal correspondiente.<br/>• El sistema realiza un cruce automatizado y asigna el canal 'OTROS' a los registros sin coincidencia para evitar pérdida de datos.", body_style))
+
+    story.append(Paragraph("3. Guía de Uso de los Filtros", h2_style))
+    story.append(Paragraph("• <b>Filtros Principales:</b> Permiten acotar por Año, Mes, Marca (Clasificación 1), Categoría de Cliente, Canal, Vendedor y cuenta específica de cliente.<br/>• <b>Filtro A y B (Cobertura 80/20):</b> El Filtro A establece la referencia de Pareto, mientras que el Filtro B permite evaluar de forma cruzada la colocación de múltiples marcas con indicadores visuales de éxito (✅) o brecha (❌).", body_style))
 
     doc.build(story)
     buffer.seek(0)
@@ -540,7 +568,7 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     return pdf_buffer_global
 
 # ---------------------------------------------------------
-# 5. Vista Cobertura 8020 (Filtros A y B juntos arriba)
+# 5. Vista Cobertura 8020
 # ---------------------------------------------------------
 def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list, df_filtrado: pd.DataFrame):
     st.header("🎯 Análisis de Cobertura 80/20 y Oportunidades de Alcance")
@@ -699,6 +727,32 @@ if verificar_acceso():
             st.rerun()
 
         st.divider()
+
+        # ---------------------------------------------------------
+        # Descarga del Manual en PDF (Parte inferior izquierda)
+        # ---------------------------------------------------------
+        if REPORTLAB_DISPONIBLE:
+            pdf_manual_buffer = generar_pdf_manual_operaciones()
+            if pdf_manual_buffer:
+                st.download_button(
+                    label="📖 Descargar Manual BI",
+                    data=pdf_manual_buffer,
+                    file_name="Manual BI Sedisur.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    help="Descargar el manual de operaciones del sistema en PDF"
+                )
+
+        st.markdown("---")
+        # ---------------------------------------------------------
+        # Pie de página solicitado
+        # ---------------------------------------------------------
+        st.markdown(
+            "<div style='text-align: center; font-size: 11px; color: gray; padding-bottom: 10px;'>"
+            "Creado por RM Studio para Sedisur Central K.C.M.A."
+            "</div>",
+            unsafe_allow_html=True
+        )
 
     lista_canales = ['TODOS'] + sorted([c for c in df_raw['CANAL'].dropna().unique().tolist() if c != 'OTROS']) + ['OTROS']
     
