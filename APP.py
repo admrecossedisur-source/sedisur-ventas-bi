@@ -26,7 +26,7 @@ USUARIOS_PERMITIDOS = {
     "eddy.zuniga@sedisur.com": {"password": "Edz000", "cargo": "Supervisión", "rol": "Usuario"},
     "cristina.nunez@sedisur.com": {"password": "Crn000", "cargo": "Supervisión", "rol": "administrador"},
     "erick.abarca@sedisur.com": {"password": "absa1528", "cargo": "Supervisión", "rol": "Usuario"},
-    "adm": {"password": "Adm1994", "cargo": "Supervisión", "rol": "administrador"}  # Corregido: 'Supervisión' cambiado por 'rol'
+    "adm": {"password": "Adm1994", "cargo": "Supervisión", "rol": "administrador"}  # Corregido y validado
 }
 
 def verificar_acceso():
@@ -74,7 +74,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# 2. Carga de Datos Segura y Mapeo de Canales
+# 2. Carga de Datos Segura y Mapeo de Canales (Corregido)
 # ---------------------------------------------------------
 @st.cache_data
 def cargar_datos_exactus():
@@ -87,7 +87,6 @@ def cargar_datos_exactus():
         9: 'Septiembre', 10: 'Octubre', 11: 'Noviembre', 12: 'Diciembre'
     }
     df['MES_NOMBRE'] = df['MES_NUM'].map(meses_es)
-    # Estandarizar CLIENTE como texto sin espacios sobrantes
     df['CLIENTE'] = df['CLIENTE'].astype(str).str.strip()
     df['CLIENTE_DISPLAY'] = df['CLIENTE'] + " - " + df['ALIAS'].astype(str)
     return df
@@ -96,13 +95,23 @@ def cargar_datos_exactus():
 def cargar_datos_canales():
     try:
         df_canales = pd.read_excel("CLIENTES POR CANAL.xlsx")
-        # Estandarizar CLIENTE como texto sin espacios sobrantes para asegurar el cruce
-        df_canales['CLIENTE'] = df_canales['CLIENTE'].astype(str).str.strip()
-        if 'CANAL' in df_canales.columns:
+        # Limpiar nombres de columnas para evitar errores de espacios o mayúsculas
+        df_canales.columns = [str(c).strip().upper() for c in df_canales.columns]
+        
+        # Buscar la columna de cliente y de canal de forma flexible
+        col_cliente = next((c for c in df_canales.columns if 'CLIENTE' in c), None)
+        col_canal = next((c for c in df_canales.columns if 'CANAL' in c), None)
+        
+        if col_cliente and col_canal:
+            df_canales = df_canales[[col_cliente, col_canal]].copy()
+            df_canales.columns = ['CLIENTE', 'CANAL']
+            df_canales['CLIENTE'] = df_canales['CLIENTE'].astype(str).str.strip()
             df_canales['CANAL'] = df_canales['CANAL'].astype(str).str.strip()
-        return df_canales
-    except Exception:
-        return pd.DataFrame(columns=['CANAL', 'CLIENTE', 'ALIAS'])
+            return df_canales
+    except Exception as e:
+        st.warning(f"No se pudo cargar el archivo de canales: {e}")
+    
+    return pd.DataFrame(columns=['CLIENTE', 'CANAL'])
 
 # ---------------------------------------------------------
 # 3. Funciones de Apoyo (Cálculos y Tablas)
@@ -646,7 +655,6 @@ if verificar_acceso():
         df_raw = cargar_datos_exactus()
         df_canales = cargar_datos_canales()
 
-    # Mapeo seguro de Canales estandarizando ambas claves para evitar pérdida de datos
     df_raw['CLIENTE'] = df_raw['CLIENTE'].astype(str).str.strip()
     if not df_canales.empty:
         df_canales['CLIENTE'] = df_canales['CLIENTE'].astype(str).str.strip()
@@ -692,10 +700,8 @@ if verificar_acceso():
 
         st.divider()
 
-    # Obtener lista completa de canales incluyendo explícitamente "OTROS"
     lista_canales = ['TODOS'] + sorted([c for c in df_raw['CANAL'].dropna().unique().tolist() if c != 'OTROS']) + ['OTROS']
     
-    # Lista de clientes para el multiselect (Código - Alias) exclusiva de Comparativa
     df_clientes_unicos = df_raw[['CLIENTE', 'ALIAS']].drop_duplicates().sort_values('CLIENTE')
     opciones_clientes = df_clientes_unicos['CLIENTE'].tolist()
     format_func_cliente = lambda x: f"{x} - {df_clientes_unicos[df_clientes_unicos['CLIENTE'] == x]['ALIAS'].values[0]}" if x in df_clientes_unicos['CLIENTE'].values else str(x)
@@ -726,10 +732,8 @@ if verificar_acceso():
                 vendedores = sorted(df_raw['VENDEDOR'].dropna().unique())
                 sel_vendedores = st.multiselect("Vendedor", vendedores, key="filtro_vendedores")
 
-            # Filtro por Código de Cliente solo en Comparativa
             sel_clientes = st.multiselect("Cliente (Código y Alias)", options=opciones_clientes, format_func=format_func_cliente, key="filtro_clientes_comp")
 
-        # Aplicar filtros
         df_raw_global = df_raw.copy()
         if filtro_canal_sel != 'TODOS':
             df_raw_global = df_raw_global[df_raw_global['CANAL'] == filtro_canal_sel]
@@ -770,12 +774,10 @@ if verificar_acceso():
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                # Columna 1: Filtro A y Filtro B juntos arriba
                 filtro_a = st.selectbox("📌 Filtro A (Referencia 80/20)", options=opciones_filtro_a, key="filtro_a_cob")
                 filtros_b = st.multiselect("🔍 Filtro B (Comparativo de Colocación)", options=marcas_disponibles, key="filtro_b_cob")
 
             with col2:
-                # Columna 2: Año y Mes
                 anios_disponibles = sorted(df_raw['ANIO'].unique(), reverse=True)
                 sel_anios_cob = st.multiselect("Año", anios_disponibles, key="filtro_anios_cob")
                 
@@ -784,7 +786,6 @@ if verificar_acceso():
                 sel_meses_cob = st.multiselect("Mes", meses_disponibles, key="filtro_meses_cob")
 
             with col3:
-                # Columna 3: Vendedor y Categoría Cliente
                 sel_vendedores_cob = st.multiselect("Vendedor", vendedores_disponibles, key="filtro_vendedores_cob")
                 categorias = sorted(df_raw['CATEGORIA_CLIENTE'].dropna().unique())
                 sel_cats_cob = st.multiselect("Categoría Cliente", categorias, key="filtro_cats_cob")
