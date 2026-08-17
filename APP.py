@@ -88,11 +88,36 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# 2. Carga de Datos Segura y Mapeo de Canales
+# 2. Carga de Datos Segura Dividida por Años (Optimización de RAM)
 # ---------------------------------------------------------
 @st.cache_data
 def cargar_datos_exactus():
-    df = pd.read_parquet("datos_ventas.parquet")
+    anios_a_cargar = [2024, 2025, 2026]
+    columnas_necesarias = [
+        'CLIENTE', 'ALIAS', 'NOMBRE', 'ANIO', 'MES_NUM', 
+        'VENTA_NETA', 'CANTIDAD_NETA', 'CLASIFICACION_1', 
+        'CLASIFICACION_2', 'CLASIFICACION_3', 'CLASIFICACION_4', 
+        'CATEGORIA_CLIENTE', 'VENDEDOR'
+    ]
+    
+    dfs = []
+    for anio in anios_a_cargar:
+        archivo = f"ventas_{anio}.parquet"
+        try:
+            df_temp = pd.read_parquet(archivo, columns=[c for c in columnas_necesarias if c != 'MES_NOMBRE'])
+            dfs.append(df_temp)
+        except FileNotFoundError:
+            st.warning(f"⚠️ No se encontró el archivo de datos: {archivo}")
+
+    if not dfs:
+        # Fallback de respaldo por si aún conservas el archivo único consolidado
+        try:
+            df = pd.read_parquet("datos_ventas.parquet")
+        except FileNotFoundError:
+            return pd.DataFrame()
+    else:
+        df = pd.concat(dfs, ignore_index=True)
+
     df = df[df['CLASIFICACION_1'].notna() & (df['CLASIFICACION_1'].astype(str).str.strip() != '') & (df['CLASIFICACION_1'] != 'SIN CLASIFICAR')]
 
     meses_es = {
@@ -103,6 +128,13 @@ def cargar_datos_exactus():
     df['MES_NOMBRE'] = df['MES_NUM'].map(meses_es)
     df['CLIENTE'] = df['CLIENTE'].astype(str).str.strip()
     df['CLIENTE_DISPLAY'] = df['CLIENTE'] + " - " + df['ALIAS'].astype(str)
+
+    # Optimización de tipos de datos para liberar RAM
+    cols_cat = ['CLASIFICACION_1', 'CLASIFICACION_2', 'CATEGORIA_CLIENTE', 'VENDEDOR']
+    for c in cols_cat:
+        if c in df.columns:
+            df[c] = df[c].astype('category')
+
     return df
 
 @st.cache_data
@@ -583,7 +615,7 @@ def mostrar_vista_comparativa(df: pd.DataFrame, df_raw_completo: pd.DataFrame):
     return pdf_buffer_global
 
 # ---------------------------------------------------------
-# 5. Vista Cobertura 8020 (Optimizado con Caché)
+# 5. Vista Cobertura 8020 (Procesamiento Ultrarrápido)
 # ---------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def procesar_cobertura_optimizado(df_ref_a):
@@ -666,7 +698,6 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
     st.subheader(f"📊 Matriz de Cobertura para: {filtro_a}{titulo_b_str}")
     st.caption(f"Mostrando un total de **{len(df_tabla_final):,}** clientes ordenados por relevancia.")
     
-    # Visualización ultra liviana para la memoria de Streamlit
     st.dataframe(df_tabla_final, width='stretch', hide_index=True)
 
 # ---------------------------------------------------------
@@ -868,7 +899,7 @@ if verificar_acceso():
                 categorias = sorted(df_raw['CATEGORIA_CLIENTE'].dropna().unique())
                 sel_cats_cob = st.multiselect("Categoría Cliente", categorias, key="filtro_cats_cob")
 
-        # --- PANEL 2: Filtros Comerciales (Filtro A vs Filtro B con Cascada Independiente) ---
+        # --- PANEL 2: Filtros Comerciales (Filtro A y Filtro B Escalonados) ---
         with st.expander("🔍 **Panel 2: Filtros Comerciales (Filtro A y Filtro B Escalonados)**", expanded=False):
             marcas_disponibles = sorted(df_raw['CLASIFICACION_1'].dropna().unique())
             
