@@ -83,7 +83,7 @@ def verificar_acceso():
 # 1. Configuración Inicial de la Página
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="Sedisur BI - Comparativa de Ventas",
+    page_title="Sedisur BI",
     page_icon="Sedisur_logo.png",
     layout="wide"
 )
