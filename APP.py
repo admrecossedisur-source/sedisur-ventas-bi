@@ -346,34 +346,12 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
     return buffer
 
 def generar_pdf_manual_operaciones():
-    if not REPORTLAB_DISPONIBLE:
+    """Lee y carga directamente tu archivo PDF personalizado de manual."""
+    try:
+        with open("Manual_Operaciones_Sedisur.pdf", "rb") as f:
+            return f.read()
+    except FileNotFoundError:
         return None
-    
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
-    story = []
-    styles = getSampleStyleSheet()
-
-    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=16, textColor=colors.HexColor("#2f5597"), spaceAfter=10)
-    h2_style = ParagraphStyle('H2Style', parent=styles['Heading2'], fontSize=12, textColor=colors.HexColor("#4a90e2"), spaceBefore=10, spaceAfter=4)
-    body_style = ParagraphStyle('BodyStyle', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor("#333333"), spaceAfter=6, leading=12)
-
-    story.append(Paragraph("<b>Manual de Operaciones - Sedisur BI</b>", title_style))
-    story.append(Paragraph("Sistema de Business Intelligence y Análisis Comercial", body_style))
-    story.append(Spacer(1, 10))
-
-    story.append(Paragraph("1. Objetivo del Sistema", h2_style))
-    story.append(Paragraph("El sistema Sedisur BI optimiza la toma de decisiones gerenciales mediante comparativas históricas (Año contra Año), análisis de cobertura y Pareto (80/20), gestión de accesos por roles y exportación automatizada de reportes ejecutivos.", body_style))
-
-    story.append(Paragraph("2. Flujo de Trabajo y Carga de Datos", h2_style))
-    story.append(Paragraph("• <b>datos_ventas.parquet:</b> Almacena el histórico transaccional de ventas.<br/>• <b>CLIENTES POR CANAL.xlsx:</b> Archivo auxiliar que clasifica a cada cliente en su canal correspondiente.<br/>• El sistema realiza un cruce automatizado y asigna el canal 'OTROS' a los registros sin coincidencia para evitar pérdida de datos.", body_style))
-
-    story.append(Paragraph("3. Guía de Uso de los Filtros", h2_style))
-    story.append(Paragraph("• <b>Filtros Principales:</b> Permiten acotar por Año, Mes, Marca (Clasificación 1), Categoría de Cliente, Canal, Vendedor y cuenta específica de cliente.<br/>• <b>Filtro A y B (Cobertura 80/20):</b> El Filtro A establece la referencia de Pareto, mientras que el Filtro B permite evaluar de forma cruzada la colocación de múltiples marcas con indicadores visuales de éxito (✅) o brecha (❌).", body_style))
-
-    doc.build(story)
-    buffer.seek(0)
-    return buffer
 
 def mostrar_vista_comparativa(df: pd.DataFrame):
     st.header("📈 Comparativa de Ventas Año contra Año")
@@ -731,17 +709,18 @@ if verificar_acceso():
         # ---------------------------------------------------------
         # Descarga del Manual en PDF (Parte inferior izquierda)
         # ---------------------------------------------------------
-        if REPORTLAB_DISPONIBLE:
-            pdf_manual_buffer = generar_pdf_manual_operaciones()
-            if pdf_manual_buffer:
-                st.download_button(
-                    label="📖 Descargar Manual BI",
-                    data=pdf_manual_buffer,
-                    file_name="Manual BI Sedisur.pdf",
-                    mime="application/pdf",
-                    use_container_width=True,
-                    help="Descargar el manual de operaciones del sistema en PDF"
-                )
+        pdf_manual_bytes = generar_pdf_manual_operaciones()
+        if pdf_manual_bytes:
+            st.download_button(
+                label="📖 Descargar Manual BI",
+                data=pdf_manual_bytes,
+                file_name="Manual_Operaciones_Sedisur.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                help="Descargar tu manual de operaciones en PDF"
+            )
+        else:
+            st.warning("⚠️ No se encontró 'Manual_Operaciones_Sedisur.pdf' en el directorio.")
 
         st.markdown("---")
         # ---------------------------------------------------------
