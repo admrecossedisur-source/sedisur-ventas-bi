@@ -15,7 +15,7 @@ except ImportError:
     REPORTLAB_DISPONIBLE = False
 
 # ---------------------------------------------------------
-# 0. Sistema de Autenticación de Usuarios
+# 0. Sistema de Autenticación de Usuarios (Actualizado con Proveedores)
 # ---------------------------------------------------------
 USUARIOS_PERMITIDOS = {
     "kenneth.martinez@sedisur.com": {"password": "Kem000", "cargo": "Gerencia", "rol": "Usuario"},
@@ -26,7 +26,15 @@ USUARIOS_PERMITIDOS = {
     "eddy.zuniga@sedisur.com": {"password": "Edz000", "cargo": "Supervisión", "rol": "Usuario"},
     "cristina.nunez@sedisur.com": {"password": "Crn000", "cargo": "Supervisión", "rol": "administrador"},
     "erick.abarca@sedisur.com": {"password": "absa1528", "cargo": "Supervisión", "rol": "Usuario"},
-    "adm": {"password": "Adm1994", "cargo": "Supervisión", "rol": "administrador"}
+    "adm": {"password": "Adm1994", "cargo": "Supervisión", "rol": "administrador"},
+    
+    # --- Agentes Proveedores ---
+    "eliecer_valdez@colpal.com": {"password": "Col123", "cargo": "Agente Proveedor", "rol": "proveedor_marca", "marca_restringida": "COLGATE_PALM"},
+    "hugomora@alimer.com": {"password": "Ali123", "cargo": "Agente Proveedor", "rol": "proveedor_marca", "marca_restringida": "ALIMER S.A."},
+    "jonathan.romero@sedisur.com": {"password": "Rec123", "cargo": "Agente Proveedor", "rol": "proveedor_marca", "marca_restringida": "RECKITT"},
+    "alexander.castro@essity.com": {"password": "Ess123", "cargo": "Agente Proveedor", "rol": "proveedor_marca", "marca_restringida": "ESSITY"},
+    "juan.segura@pepsico.com": {"password": "Pep123", "cargo": "Agente Proveedor", "rol": "proveedor_marca", "marca_restringida": "PEPSICO"},
+    "juan.campos@kraftheinz.com": {"password": "Hei123", "cargo": "Agente Proveedor", "rol": "proveedor_marca", "marca_restringida": "HEINZ.CR"}
 }
 
 def verificar_acceso():
@@ -57,6 +65,13 @@ def verificar_acceso():
                     st.session_state["usuario_actual"] = correo
                     st.session_state["cargo_actual"] = USUARIOS_PERMITIDOS[correo]["cargo"]
                     st.session_state["rol_actual"] = USUARIOS_PERMITIDOS[correo]["rol"]
+                    
+                    # Guardar marca restringida si aplica
+                    if USUARIOS_PERMITIDOS[correo]["rol"] == "proveedor_marca":
+                        st.session_state["marca_restringida"] = USUARIOS_PERMITIDOS[correo]["marca_restringida"]
+                    else:
+                        st.session_state["marca_restringida"] = None
+
                     st.success("¡Acceso concedido!")
                     st.rerun()
                 else:
@@ -74,7 +89,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# 2. Carga de Datos Segura y Mapeo de Canales (Corregido)
+# 2. Carga de Datos Segura y Mapeo de Canales
 # ---------------------------------------------------------
 @st.cache_data
 def cargar_datos_exactus():
@@ -293,7 +308,12 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
 
     story.append(Spacer(1, 8))
 
-    proveedores_principales = ['COLGATE_PALM', 'ESSITY', 'HEINZ.CR', 'ALIMER S.A.', 'PEPSICO']
+    # Si es proveedor restringido, solo exportar su marca
+    marca_rest = st.session_state.get("marca_restringida")
+    if marca_rest:
+        proveedores_principales = [marca_rest]
+    else:
+        proveedores_principales = ['COLGATE_PALM', 'ESSITY', 'HEINZ.CR', 'ALIMER S.A.', 'PEPSICO']
 
     titulo_gen = Paragraph("<b>Tabla Comparativa por Mes y Variaciones (2024 - 2025 - 2026) - Consolidado General</b>", style_subtitle)
     data_gen = construir_datos_tabla_mensual_pdf(df_analisis)
@@ -346,7 +366,6 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
     return buffer
 
 def generar_pdf_manual_operaciones():
-    """Lee y carga directamente tu archivo PDF personalizado de manual."""
     try:
         with open("Manual_Operaciones_Sedisur.pdf", "rb") as f:
             return f.read()
@@ -360,18 +379,25 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
         st.warning("No hay datos disponibles con los filtros seleccionados.")
         return
 
-    orden_personalizado = [
-        'COLGATE_PALM', 'ESSITY', 'PEPSICO', 'HEINZ.CR', 'ALIMER S.A.',
-        'BAYER', 'RECKITT', 'BARRAZA', 'REYA CR.', 'HEALTH. RB.',
-        'GRUPO Q.', 'BEL PREMIUM', 'CODOMI', 'FARMANOVA', 'MUNDOREP', 'PRONUTRE'
-    ]
+    marca_restriccion = st.session_state.get("marca_restringida")
 
-    proveedores_disponibles_df = df['CLASIFICACION_1'].dropna().unique()
-    proveedores_ordenados = [p for p in orden_personalizado if p in proveedores_disponibles_df]
-    otros_proveedores = sorted([p for p in proveedores_disponibles_df if p not in orden_personalizado])
-    
-    lista_proveedores_final = proveedores_ordenados + otros_proveedores
-    lista_vistas = ["📊 Consolidado General (Sedisur)"] + [f"Proveedor: {p}" for p in lista_proveedores_final]
+    if marca_restriccion:
+        # Si es proveedor, solo ve su marca asignada
+        lista_vistas = [f"Proveedor: {marca_restriccion}"]
+        st.info(f"🔒 **Modo Proveedor Activo:** Visualizando únicamente los datos correspondientes a **{marca_restriccion}**.")
+    else:
+        orden_personalizado = [
+            'COLGATE_PALM', 'ESSITY', 'PEPSICO', 'HEINZ.CR', 'ALIMER S.A.',
+            'BAYER', 'RECKITT', 'BARRAZA', 'REYA CR.', 'HEALTH. RB.',
+            'GRUPO Q.', 'BEL PREMIUM', 'CODOMI', 'FARMANOVA', 'MUNDOREP', 'PRONUTRE'
+        ]
+
+        proveedores_disponibles_df = df['CLASIFICACION_1'].dropna().unique()
+        proveedores_ordenados = [p for p in orden_personalizado if p in proveedores_disponibles_df]
+        otros_proveedores = sorted([p for p in proveedores_disponibles_df if p not in orden_personalizado])
+        
+        lista_proveedores_final = proveedores_ordenados + otros_proveedores
+        lista_vistas = ["📊 Consolidado General (Sedisur)"] + [f"Proveedor: {p}" for p in lista_proveedores_final]
 
     if "indice_vista_prov" not in st.session_state:
         st.session_state["indice_vista_prov"] = 0
@@ -379,22 +405,25 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     if st.session_state["indice_vista_prov"] >= len(lista_vistas):
         st.session_state["indice_vista_prov"] = 0
 
-    col_info, col_btn_izq, col_btn_sedisur, col_btn_der = st.columns([4, 1.2, 1.2, 1.2])
+    if not marca_restriccion:
+        col_info, col_btn_izq, col_btn_sedisur, col_btn_der = st.columns([4, 1.2, 1.2, 1.2])
 
-    with col_btn_izq:
-        if st.button("◀ Anterior", use_container_width=True):
-            st.session_state["indice_vista_prov"] = (st.session_state["indice_vista_prov"] - 1) % len(lista_vistas)
-            st.rerun()
+        with col_btn_izq:
+            if st.button("◀ Anterior", use_container_width=True):
+                st.session_state["indice_vista_prov"] = (st.session_state["indice_vista_prov"] - 1) % len(lista_vistas)
+                st.rerun()
 
-    with col_btn_sedisur:
-        if st.button("🏢 Sedisur", use_container_width=True):
-            st.session_state["indice_vista_prov"] = 0
-            st.rerun()
+        with col_btn_sedisur:
+            if st.button("🏢 Sedisur", use_container_width=True):
+                st.session_state["indice_vista_prov"] = 0
+                st.rerun()
 
-    with col_btn_der:
-        if st.button("Siguiente ▶", use_container_width=True):
-            st.session_state["indice_vista_prov"] = (st.session_state["indice_vista_prov"] + 1) % len(lista_vistas)
-            st.rerun()
+        with col_btn_der:
+            if st.button("Siguiente ▶", use_container_width=True):
+                st.session_state["indice_vista_prov"] = (st.session_state["indice_vista_prov"] + 1) % len(lista_vistas)
+                st.rerun()
+    else:
+        col_info = st.columns([1])[0]
 
     seleccion_actual = lista_vistas[st.session_state["indice_vista_prov"]]
 
@@ -518,30 +547,38 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
     if REPORTLAB_DISPONIBLE:
         pdf_buffer_global = generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig)
 
-    st.divider()
-    st.header("🏢 Comparativa por Proveedores y Sub-Marcas")
+    # Si es proveedor, omitimos las tablas de sub-marcas de otros
+    if not marca_restriccion:
+        st.divider()
+        st.header("🏢 Comparativa por Proveedores y Sub-Marcas")
 
-    generar_tabla_comparativa_formateada(df_analisis, 'CLASIFICACION_1', f'Resumen ({seleccion_actual})')
+        generar_tabla_comparativa_formateada(df_analisis, 'CLASIFICACION_1', f'Resumen ({seleccion_actual})')
 
-    st.markdown("---")
+        st.markdown("---")
 
-    proveedores_excluidos = [
-        'AB-INBEV', 'BAYER', 'BEL PREMIUM', 'CODOMI',  
-        'FARMANOVA', 'GRUPO Q.', 'HEALTH. RB.', 'HEALTH',  
-        'REYA CR.', 'RECKITT'
-    ]
+        proveedores_excluidos = [
+            'AB-INBEV', 'BAYER', 'BEL PREMIUM', 'CODOMI',  
+            'FARMANOVA', 'GRUPO Q.', 'HEALTH. RB.', 'HEALTH',  
+            'REYA CR.', 'RECKITT'
+        ]
 
-    proveedores_disponibles_sub = df_analisis['CLASIFICACION_1'].dropna().unique()
-    proveedores_a_mostrar = [p for p in lista_proveedores_final if p in proveedores_disponibles_sub]
-    otros_proveedores_sub = sorted([p for p in proveedores_disponibles_sub if p not in lista_proveedores_final])
-    proveedores_finales_sub = proveedores_a_mostrar + otros_proveedores_sub
+        orden_personalizado = [
+            'COLGATE_PALM', 'ESSITY', 'PEPSICO', 'HEINZ.CR', 'ALIMER S.A.',
+            'BAYER', 'RECKITT', 'BARRAZA', 'REYA CR.', 'HEALTH. RB.',
+            'GRUPO Q.', 'BEL PREMIUM', 'CODOMI', 'FARMANOVA', 'MUNDOREP', 'PRONUTRE'
+        ]
 
-    for prov in proveedores_finales_sub:
-        prov_limpio = prov.strip()
-        if prov_limpio not in proveedores_excluidos:
-            df_prov = df_analisis[df_analisis['CLASIFICACION_1'].str.strip() == prov_limpio]
-            if not df_prov.empty:
-                generar_tabla_comparativa_formateada(df_prov, 'CLASIFICACION_2', f"Proveedor: {prov}")
+        proveedores_disponibles_sub = df_analisis['CLASIFICACION_1'].dropna().unique()
+        proveedores_a_mostrar = [p for p in orden_personalizado if p in proveedores_disponibles_sub]
+        otros_proveedores_sub = sorted([p for p in proveedores_disponibles_sub if p not in orden_personalizado])
+        proveedores_finales_sub = proveedores_a_mostrar + otros_proveedores_sub
+
+        for prov in proveedores_finales_sub:
+            prov_limpio = prov.strip()
+            if prov_limpio not in proveedores_excluidos:
+                df_prov = df_analisis[df_analisis['CLASIFICACION_1'].str.strip() == prov_limpio]
+                if not df_prov.empty:
+                    generar_tabla_comparativa_formateada(df_prov, 'CLASIFICACION_2', f"Proveedor: {prov}")
 
     return pdf_buffer_global
 
@@ -551,6 +588,11 @@ def mostrar_vista_comparativa(df: pd.DataFrame):
 def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list, df_filtrado: pd.DataFrame):
     st.header("🎯 Análisis de Cobertura 80/20 y Oportunidades de Alcance")
     st.markdown("Utiliza el panel superior para configurar el **Filtro A** y múltiples marcas en el **Filtro B** para evaluar la cobertura y brechas.")
+
+    marca_restriccion = st.session_state.get("marca_restringida")
+    if marca_restriccion:
+        filtro_a = marca_restriccion
+        st.info(f"🔒 **Modo Proveedor Activo:** Analizando cobertura exclusivamente para **{marca_restriccion}**.")
 
     if not filtro_a:
         st.info("👆 Por favor, seleccione una opción en el **Filtro A (Referencia 80/20)** en el panel superior para calcular el Pareto.")
@@ -625,7 +667,7 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
     df_tabla_final['% Acumulado'] = df_clientes['PORCENTAJE_ACUMULADO']
     df_tabla_final['Cobertura Filtro A'] = "✅"
 
-    if filtros_b:
+    if filtros_b and not marca_restriccion:
         for prov_b in filtros_b:
             df_ref_b = df_filtrado[df_filtrado['CLASIFICACION_1'] == prov_b]
             df_clientes_b = df_ref_b.groupby('CLIENTE', as_index=False).agg(
@@ -649,7 +691,7 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
     df_mostrar = df_tabla_final.drop(columns=['CLIENTE', '% Acumulado'])
     styler_8020 = df_mostrar.style.apply(resaltar_8020, axis=1)
 
-    titulo_b_str = f" vs ({', '.join(filtros_b)})" if filtros_b else ""
+    titulo_b_str = f" vs ({', '.join(filtros_b)})" if (filtros_b and not marca_restriccion) else ""
     st.subheader(f"📊 Matriz de Cobertura para: {filtro_a}{titulo_b_str}")
     st.dataframe(styler_8020, use_container_width=True, hide_index=True)
 
@@ -669,6 +711,11 @@ if verificar_acceso():
     else:
         df_raw['CANAL'] = 'OTROS'
 
+    # Aplicar restricción global si el usuario es proveedor
+    marca_restriccion = st.session_state.get("marca_restringida")
+    if marca_restriccion:
+        df_raw = df_raw[df_raw['CLASIFICACION_1'].str.strip() == marca_restriccion]
+
     if "vista_activa" not in st.session_state:
         st.session_state["vista_activa"] = "comparativa"
 
@@ -682,6 +729,9 @@ if verificar_acceso():
         st.markdown(f"💼 **Cargo:** {st.session_state.get('cargo_actual', '')}")
         st.markdown(f"🛡️ **Rol:** {st.session_state.get('rol_actual', '')}")
         
+        if marca_restriccion:
+            st.markdown(f"🏷️ **Marca Asignada:** `{marca_restriccion}`")
+
         st.markdown("---")
         
         if st.button("🔄 Recargar Datos", use_container_width=True, help="Limpia la caché y recarga los datos"):
@@ -706,9 +756,6 @@ if verificar_acceso():
 
         st.divider()
 
-        # ---------------------------------------------------------
-        # Descarga del Manual en PDF (Parte inferior izquierda)
-        # ---------------------------------------------------------
         pdf_manual_bytes = generar_pdf_manual_operaciones()
         if pdf_manual_bytes:
             st.download_button(
@@ -723,9 +770,6 @@ if verificar_acceso():
             st.warning("⚠️ No se encontró 'Manual_Operaciones_Sedisur.pdf' en el directorio.")
 
         st.markdown("---")
-        # ---------------------------------------------------------
-        # Pie de página solicitado
-        # ---------------------------------------------------------
         st.markdown(
             "<div style='text-align: center; font-size: 11px; color: gray; padding-bottom: 10px;'>"
             "Creado por RM Studio para Sedisur Central K.C.M.A."
@@ -754,8 +798,12 @@ if verificar_acceso():
                 sel_meses = st.multiselect("Mes", meses_disponibles, key="filtro_meses")
 
             with col2:
-                marcas = sorted(df_raw['CLASIFICACION_1'].dropna().unique())
-                sel_marcas = st.multiselect("Clasificación 1 (Marca)", marcas, key="filtro_marcas")
+                if marca_restriccion:
+                    st.selectbox("Clasificación 1 (Marca)", options=[marca_restriccion], disabled=True, key="filtro_marcas_bloqueado")
+                    sel_marcas = [marca_restriccion]
+                else:
+                    marcas = sorted(df_raw['CLASIFICACION_1'].dropna().unique())
+                    sel_marcas = st.multiselect("Clasificación 1 (Marca)", marcas, key="filtro_marcas")
                 
                 categorias = sorted(df_raw['CATEGORIA_CLIENTE'].dropna().unique())
                 sel_cats = st.multiselect("Categoría Cliente", categorias, key="filtro_cats")
@@ -776,7 +824,7 @@ if verificar_acceso():
             df_filt = df_filt[df_filt['ANIO'].isin(sel_anios)]
         if sel_meses:
             df_filt = df_filt[df_filt['MES_NOMBRE'].isin(sel_meses)]
-        if sel_marcas:
+        if sel_marcas and not marca_restriccion:
             df_filt = df_filt[df_filt['CLASIFICACION_1'].isin(sel_marcas)]
         if sel_cats:
             df_filt = df_filt[df_filt['CATEGORIA_CLIENTE'].isin(sel_cats)]
@@ -801,14 +849,24 @@ if verificar_acceso():
     elif st.session_state["vista_activa"] == "cobertura":
         with st.expander("🔍 **Panel de Filtros Comerciales (Cobertura 80/20)**", expanded=True):
             marcas_disponibles = sorted(df_raw['CLASIFICACION_1'].dropna().unique())
-            opciones_filtro_a = ["TODOS (Consolidado Sedisur)"] + list(marcas_disponibles)
+            
+            if marca_restriccion:
+                opciones_filtro_a = [marca_restriccion]
+            else:
+                opciones_filtro_a = ["TODOS (Consolidado Sedisur)"] + list(marcas_disponibles)
+                
             vendedores_disponibles = sorted(df_raw['VENDEDOR'].dropna().unique())
 
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                filtro_a = st.selectbox("📌 Filtro A (Referencia 80/20)", options=opciones_filtro_a, key="filtro_a_cob")
-                filtros_b = st.multiselect("🔍 Filtro B (Comparativo de Colocación)", options=marcas_disponibles, key="filtro_b_cob")
+                if marca_restriccion:
+                    st.selectbox("📌 Filtro A (Referencia 80/20)", options=[marca_restriccion], disabled=True, key="filtro_a_cob_bloq")
+                    filtro_a = marca_restriccion
+                    filtros_b = []
+                else:
+                    filtro_a = st.selectbox("📌 Filtro A (Referencia 80/20)", options=opciones_filtro_a, key="filtro_a_cob")
+                    filtros_b = st.multiselect("🔍 Filtro B (Comparativo de Colocación)", options=marcas_disponibles, key="filtro_b_cob")
 
             with col2:
                 anios_disponibles = sorted(df_raw['ANIO'].unique(), reverse=True)
