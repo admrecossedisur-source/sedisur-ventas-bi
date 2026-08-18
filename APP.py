@@ -88,7 +88,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# 2. Carga de Datos Segura Dividida por Años (Optimización de RAM)
+# 2. Carga de Datos Segura Dividida por Años
 # ---------------------------------------------------------
 @st.cache_data
 def cargar_datos_exactus():
@@ -107,10 +107,9 @@ def cargar_datos_exactus():
             df_temp = pd.read_parquet(archivo, columns=[c for c in columnas_necesarias if c != 'MES_NOMBRE'])
             dfs.append(df_temp)
         except FileNotFoundError:
-            st.warning(f"⚠️ No se encontró el archivo de datos: {archivo}")
+            pass
 
     if not dfs:
-        # Fallback de respaldo por si aún conservas el archivo único consolidado
         try:
             df = pd.read_parquet("datos_ventas.parquet")
         except FileNotFoundError:
@@ -129,7 +128,6 @@ def cargar_datos_exactus():
     df['CLIENTE'] = df['CLIENTE'].astype(str).str.strip()
     df['CLIENTE_DISPLAY'] = df['CLIENTE'] + " - " + df['ALIAS'].astype(str)
 
-    # Optimización de tipos de datos para liberar RAM
     cols_cat = ['CLASIFICACION_1', 'CLASIFICACION_2', 'CATEGORIA_CLIENTE', 'VENDEDOR']
     for c in cols_cat:
         if c in df.columns:
@@ -615,38 +613,8 @@ def mostrar_vista_comparativa(df: pd.DataFrame, df_raw_completo: pd.DataFrame):
     return pdf_buffer_global
 
 # ---------------------------------------------------------
-# 5. Vista Cobertura 8020 (Procesamiento Ultrarrápido)
+# 5. Vista Cobertura 8020
 # ---------------------------------------------------------
-@st.cache_data(show_spinner=False)
-def procesar_cobertura_optimizado(df_ref_a):
-    if df_ref_a.empty:
-        return pd.DataFrame()
-
-    df_mensual_cliente = df_ref_a.groupby(['CLIENTE', 'ALIAS', 'CATEGORIA_CLIENTE', 'ANIO', 'MES_NUM'], as_index=False).agg(
-        VENTA_MES=('VENTA_NETA', 'sum')
-    )
-
-    if df_mensual_cliente.empty:
-        return pd.DataFrame()
-
-    df_clientes = df_mensual_cliente.groupby(['CLIENTE', 'ALIAS', 'CATEGORIA_CLIENTE'], as_index=False).agg(
-        VENTA_TOTAL_A=('VENTA_MES', 'sum'),
-        VENTA_PROMEDIO_A=('VENTA_MES', 'mean')
-    ).sort_values(by='VENTA_PROMEDIO_A', ascending=False).reset_index(drop=True)
-
-    if df_clientes.empty:
-        return pd.DataFrame()
-
-    venta_total_promedio_acumulada = df_clientes['VENTA_PROMEDIO_A'].sum()
-    if venta_total_promedio_acumulada > 0:
-        df_clientes['PORCENTAJE_INDIVIDUAL'] = (df_clientes['VENTA_PROMEDIO_A'] / venta_total_promedio_acumulada) * 100
-        df_clientes['PORCENTAJE_ACUMULADO'] = df_clientes['PORCENTAJE_INDIVIDUAL'].cumsum()
-    else:
-        df_clientes['PORCENTAJE_INDIVIDUAL'] = 0.0
-        df_clientes['PORCENTAJE_ACUMULADO'] = 0.0
-
-    return df_clientes
-
 def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list, df_filtrado: pd.DataFrame):
     st.header("🎯 Análisis de Cobertura 80/20 y Oportunidades de Alcance")
 
@@ -656,7 +624,7 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
         st.info(f"🔒 **Modo Proveedor Activo:** Analizando cobertura exclusivamente para **{marca_restriccion}**.")
 
     if not filtro_a:
-        st.info("👆 Por favor, seleccione una opción en el **Filtro A (Referencia 80/20)** para calcular el Pareto.")
+        st.info("👆 Por favor, seleccione una opción en el **Filtro A (Referencia 80/20)** en el segundo panel para calcular el Pareto.")
         return
 
     if df_filtrado.empty:
@@ -664,41 +632,113 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
         return
 
     if filtro_a == "TODOS (Consolidado Sedisur)":
-        df_ref_a = df_filtrado
+        df_ref_a = df_filtrado.copy()
     else:
         df_ref_a = df_filtrado[df_filtrado['CLASIFICACION_1'] == filtro_a]
 
     if df_ref_a.empty:
-        st.warning("No se encontraron registros para la referencia seleccionada en el Filtro A.")
+        st.warning("No se encontraron registros para la referencia seleccionada en el Filtro A con los filtros actuales.")
         return
 
-    with st.spinner("Calculando matriz Pareto 80/20..."):
-        df_clientes = procesar_cobertura_optimizado(df_ref_a)
+    # A. Cálculo del Promedio Mensual
+    df_mensual_cliente = df_ref_a.groupby(['CLIENTE', 'ALIAS', 'CATEGORIA_CLIENTE', 'ANIO', 'MES_NUM'], as_index=False).agg(
+        VENTA_MES=('VENTA_NETA', 'sum')
+    )
+
+    if df_mensual_cliente.empty:
+        st.warning("No se encontraron registros para calcular la cobertura con los filtros actuales.")
+        return
+
+    df_clientes = df_mensual_cliente.groupby(['CLIENTE', 'ALIAS', 'CATEGORIA_CLIENTE'], as_index=False).agg(
+        VENTA_TOTAL_A=('VENTA_MES', 'sum'),
+        VENTA_PROMEDIO_A=('VENTA_MES', 'mean')
+    ).sort_values(by='VENTA_PROMEDIO_A', ascending=False).reset_index(drop=True)
 
     if df_clientes.empty:
         st.warning("No se pudieron agrupar los clientes para esta selección.")
         return
 
+    df_clientes['Posición'] = df_clientes.index + 1
+
+    venta_total_promedio_acumulada = df_clientes['VENTA_PROMEDIO_A'].sum()
+    df_clientes['PORCENTAJE_INDIVIDUAL'] = 0.0
+    df_clientes['PORCENTAJE_ACUMULADO'] = 0.0
+
+    if venta_total_promedio_acumulada > 0:
+        df_clientes['PORCENTAJE_INDIVIDUAL'] = (df_clientes['VENTA_PROMEDIO_A'] / venta_total_promedio_acumulada) * 100
+        df_clientes['PORCENTAJE_ACUMULADO'] = df_clientes['PORCENTAJE_INDIVIDUAL'].cumsum()
+
+    # B. Cálculo de la Venta del Mes Actual en base al FILTRO A
+    ahora = datetime.now()
+    mes_actual_num = ahora.month
+    anio_actual_valor = ahora.year
+
+    if filtro_a == "TODOS (Consolidado Sedisur)":
+        df_base_actual = df_raw.copy()
+    else:
+        df_base_actual = df_raw[df_raw['CLASIFICACION_1'] == filtro_a]
+
+    df_mes_actual_ref = df_base_actual[
+        (df_base_actual['ANIO'] == anio_actual_valor) & 
+        (df_base_actual['MES_NUM'] == mes_actual_num)
+    ]
+
+    if not df_mes_actual_ref.empty:
+        df_venta_mes_actual = df_mes_actual_ref.groupby('CLIENTE', as_index=False).agg(
+            VENTA_MES_ACTUAL=('VENTA_NETA', 'sum')
+        )
+    else:
+        df_venta_mes_actual = pd.DataFrame(columns=['CLIENTE', 'VENTA_MES_ACTUAL'])
+
+    df_clientes = df_clientes.merge(df_venta_mes_actual, on='CLIENTE', how='left')
+    df_clientes['VENTA_MES_ACTUAL'] = df_clientes['VENTA_MES_ACTUAL'].fillna(0)
+
+    # Construcción de la tabla final
     df_tabla_final = pd.DataFrame()
-    df_tabla_final['Posición'] = range(1, len(df_clientes) + 1)
+    df_tabla_final['Posición'] = df_clientes['Posición']
+    df_tabla_final['CLIENTE'] = df_clientes['CLIENTE']
     df_tabla_final['Cód. Cliente'] = df_clientes['CLIENTE']
     df_tabla_final['Alias'] = df_clientes['ALIAS']
     df_tabla_final['Categoría Cliente'] = df_clientes['CATEGORIA_CLIENTE']
     df_tabla_final['% Individual'] = df_clientes['PORCENTAJE_INDIVIDUAL'].apply(lambda x: f"{x:.2f}%")
-    df_tabla_final['Venta Promedio Mensual'] = df_clientes['VENTA_PROMEDIO_A'].apply(lambda x: f"₡{x:,.2f}")
-    df_tabla_final['¿Es 80/20?'] = ['🟢 Sí' if acum <= 80.0 else '⚪ No' for acum in df_clientes['PORCENTAJE_ACUMULADO']]
+    df_tabla_final['Venta Promedio Mensual (Filtro A)'] = df_clientes['VENTA_PROMEDIO_A'].apply(lambda x: f"₡{x:,.2f}")
+    df_tabla_final['Venta Mes Actual'] = df_clientes['VENTA_MES_ACTUAL'].apply(lambda x: f"₡{x:,.2f}")
+    df_tabla_final['% Acumulado'] = df_clientes['PORCENTAJE_ACUMULADO']
+    df_tabla_final['Cobertura Filtro A'] = "✅"
 
     if filtros_b and not marca_restriccion:
         for prov_b in filtros_b:
             df_ref_b = df_filtrado[df_filtrado['CLASIFICACION_1'] == prov_b]
-            clientes_b_set = set(df_ref_b['CLIENTE'].unique()) if not df_ref_b.empty else set()
-            df_tabla_final[f"Colocación: {prov_b}"] = ["✅" if c in clientes_b_set else "❌" for c in df_clientes['CLIENTE']]
+            if not df_ref_b.empty:
+                df_clientes_b = df_ref_b.groupby('CLIENTE', as_index=False).agg(
+                    VENTA_TOTAL_B=('VENTA_NETA', 'sum')
+                )
+            else:
+                df_clientes_b = pd.DataFrame(columns=['CLIENTE', 'VENTA_TOTAL_B'])
+
+            df_tabla_final = df_tabla_final.merge(df_clientes_b, on='CLIENTE', how='left')
+            df_tabla_final['VENTA_TOTAL_B'] = df_tabla_final['VENTA_TOTAL_B'].fillna(0)
+            
+            nombre_col_colocacion = f"Colocación: {prov_b}"
+            df_tabla_final[nombre_col_colocacion] = df_tabla_final['VENTA_TOTAL_B'].apply(lambda x: "✅" if x > 0 else "❌")
+            df_tabla_final = df_tabla_final.drop(columns=['VENTA_TOTAL_B'])
+
+    def resaltar_8020(row):
+        styles = [''] * len(row)
+        try:
+            idx_porc = row.index.get_loc('% Individual')
+            if df_clientes.loc[row.name, 'PORCENTAJE_ACUMULADO'] <= 80.0:
+                styles[idx_porc] = 'color: #2e7d32; font-weight: bold;'
+        except Exception:
+            pass
+        return styles
+
+    df_mostrar = df_tabla_final.drop(columns=['CLIENTE', '% Acumulado'])
+    styler_8020 = df_mostrar.style.apply(resaltar_8020, axis=1)
 
     titulo_b_str = f" vs ({', '.join(filtros_b)})" if (filtros_b and not marca_restriccion) else ""
     st.subheader(f"📊 Matriz de Cobertura para: {filtro_a}{titulo_b_str}")
-    st.caption(f"Mostrando un total de **{len(df_tabla_final):,}** clientes ordenados por relevancia.")
-    
-    st.dataframe(df_tabla_final, width='stretch', hide_index=True)
+    st.dataframe(styler_8020, width='stretch', hide_index=True)
 
 # ---------------------------------------------------------
 # 6. Flujo Principal de Ejecución
@@ -743,7 +783,6 @@ if verificar_acceso():
         if st.button("🔄 Recargar Datos", width='stretch', help="Limpia la caché y recarga los datos"):
             cargar_datos_exactus.clear()
             cargar_datos_canales.clear()
-            procesar_cobertura_optimizado.clear()
             st.toast("¡Datos recargados correctamente!", icon="✅")
             st.rerun()
 
