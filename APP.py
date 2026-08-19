@@ -175,13 +175,11 @@ def cargar_datos_exactus():
     df['CLIENTE'] = df['CLIENTE'].astype(str).str.strip()
     df['CLIENTE_DISPLAY'] = df['CLIENTE'] + " - " + df['ALIAS'].astype(str)
 
-    # 1. Agrupación estricta para HEINZ.CR
     mascara_heinz = df['CLASIFICACION_1'].astype(str).str.strip() == 'HEINZ.CR'
     df['HEINZ_CATEGORIA'] = None
     if mascara_heinz.any():
         df.loc[mascara_heinz, 'HEINZ_CATEGORIA'] = df.loc[mascara_heinz, 'CLASIFICACION_4'].apply(clasificar_categoria_heinz_estricta)
 
-    # 2. Agrupación CORE / VASTACY para RECKITT
     mascara_reckitt = df['CLASIFICACION_1'].astype(str).str.strip() == 'RECKITT'
     df['RECKITT_SEGMENTO'] = None
     if mascara_reckitt.any():
@@ -215,7 +213,7 @@ def cargar_datos_canales():
     return pd.DataFrame(columns=['CLIENTE', 'CANAL'])
 
 # ---------------------------------------------------------
-# 3. Funciones de Apoyo y Tablas Escalonadas Tema Oscuro
+# 3. Funciones de Apoyo y Lógica de Tablas Escalonadas
 # ---------------------------------------------------------
 def calcular_variacion(actual, anterior):
     if anterior == 0 or pd.isna(anterior):
@@ -234,9 +232,9 @@ def resaltar_variaciones(val):
             pass
     return ''
 
-def generar_tabla_comparativa_formateada(df_sub: pd.DataFrame, col_group: str, titulo: str):
+def obtener_datos_comparativa_formateada(df_sub: pd.DataFrame, col_group: str, titulo: str):
     if df_sub.empty:
-        return
+        return None
 
     pivot = pd.pivot_table(
         df_sub,
@@ -249,7 +247,7 @@ def generar_tabla_comparativa_formateada(df_sub: pd.DataFrame, col_group: str, t
 
     anios = sorted([col for col in pivot.columns if col != col_group])
     if len(anios) == 0:
-        return
+        return None
 
     res_df = pd.DataFrame()
     res_df[titulo] = pivot[col_group]
@@ -297,6 +295,12 @@ def generar_tabla_comparativa_formateada(df_sub: pd.DataFrame, col_group: str, t
 
     df_tot = pd.DataFrame([totales])
     res_completo = pd.concat([res_df, df_tot], ignore_index=True)
+    return res_completo
+
+def generar_tabla_comparativa_formateada(df_sub: pd.DataFrame, col_group: str, titulo: str):
+    res_completo = obtener_datos_comparativa_formateada(df_sub, col_group, titulo)
+    if res_completo is None or res_completo.empty:
+        return
 
     cols_ind = [c for c in res_completo.columns if 'IND' in c]
     styler = res_completo.style.map(resaltar_variaciones, subset=cols_ind) if cols_ind else res_completo
@@ -309,13 +313,13 @@ def generar_tabla_comparativa_formateada(df_sub: pd.DataFrame, col_group: str, t
         height=(len(res_completo) + 1) * 35 + 5
     )
 
-def generar_tabla_escalonada_proveedor(df_prov: pd.DataFrame, nombre_prov: str):
+def construir_datos_escalonados_proveedor(df_prov: pd.DataFrame, nombre_prov: str):
     if df_prov.empty:
-        return
+        return None, []
 
     anios = sorted(df_prov['ANIO'].unique())
     if not anios:
-        return
+        return None, []
 
     meses_a3 = df_prov[df_prov['ANIO'] == anios[2]]['MES_NUM'].unique() if len(anios) >= 3 else []
 
@@ -344,10 +348,10 @@ def generar_tabla_escalonada_proveedor(df_prov: pd.DataFrame, nombre_prov: str):
         filas.append(datos)
         tipos_fila.append(tipo)
 
-    # N1: Proveedor Cabecera Principal
+    # N1: Cabecera
     procesar_agrupacion(df_prov, f"{nombre_prov}", 'N1')
 
-    # 1. CASO COLGATE_PALM: Clasif 1 -> Clasif 2 -> Clasif 4 -> Clasif 3 (Excepto 'CUIDADO BEBE')
+    # 1. COLGATE_PALM: Clasif 1 -> Clasif 2 -> Clasif 4 -> Clasif 3 (Excepto CUIDADO BEBE)
     if nombre_prov == 'COLGATE_PALM':
         c2_unicos = sorted([x for x in df_prov['CLASIFICACION_2'].dropna().unique() if str(x).strip() != ''])
         for val_c2 in c2_unicos:
@@ -368,7 +372,7 @@ def generar_tabla_escalonada_proveedor(df_prov: pd.DataFrame, nombre_prov: str):
                     df_c3 = df_c4[df_c4['CLASIFICACION_3'] == val_c3]
                     procesar_agrupacion(df_c3, f"            {val_c3}", 'N4')
 
-    # 2. CASO ESSITY: Clasif 1 -> Clasif 2 -> Clasif 3 -> Clasif 4
+    # 2. ESSITY: Clasif 1 -> Clasif 2 -> Clasif 3 -> Clasif 4
     elif nombre_prov == 'ESSITY':
         c2_unicos = sorted([x for x in df_prov['CLASIFICACION_2'].dropna().unique() if str(x).strip() != ''])
         for val_c2 in c2_unicos:
@@ -385,7 +389,7 @@ def generar_tabla_escalonada_proveedor(df_prov: pd.DataFrame, nombre_prov: str):
                     df_c4 = df_c3[df_c3['CLASIFICACION_4'] == val_c4]
                     procesar_agrupacion(df_c4, f"            {val_c4}", 'N4')
 
-    # 3. CASO HEINZ.CR: Clasif 1 -> HEINZ_CATEGORIA -> Clasif 4 -> Clasif 3 (Excepto 'OTROS')
+    # 3. HEINZ.CR: Clasif 1 -> HEINZ_CATEGORIA -> Clasif 4 -> Clasif 3 (Excepto OTROS)
     elif nombre_prov == 'HEINZ.CR':
         orden_heinz = ['MAYONESA', 'KETCHUP', 'COLADOS', 'SALSITAS', 'OTROS']
         heinz_cats_presentes = [c for c in orden_heinz if c in df_prov['HEINZ_CATEGORIA'].dropna().unique()]
@@ -394,7 +398,6 @@ def generar_tabla_escalonada_proveedor(df_prov: pd.DataFrame, nombre_prov: str):
             df_cat = df_prov[df_prov['HEINZ_CATEGORIA'] == cat_heinz]
             procesar_agrupacion(df_cat, f"{cat_heinz}", 'N2')
             
-            # En la categoría OTROS no desglosar clasificaciones 4 y 3
             if cat_heinz == 'OTROS':
                 continue
             
@@ -408,7 +411,7 @@ def generar_tabla_escalonada_proveedor(df_prov: pd.DataFrame, nombre_prov: str):
                     df_cat_c3 = df_cat_c4[df_cat_c4['CLASIFICACION_3'] == val_c3]
                     procesar_agrupacion(df_cat_c3, f"            {val_c3}", 'N4')
 
-    # 4. CASO RECKITT: Clasif 1 -> CORE / VASTACY -> Clasif 3
+    # 4. RECKITT: Clasif 1 -> CORE / VASTACY -> Clasif 3
     elif nombre_prov == 'RECKITT':
         orden_reckitt = ['CORE', 'VASTACY']
         reckitt_presentes = [r for r in orden_reckitt if r in df_prov['RECKITT_SEGMENTO'].dropna().unique()]
@@ -422,7 +425,7 @@ def generar_tabla_escalonada_proveedor(df_prov: pd.DataFrame, nombre_prov: str):
                 df_c3 = df_seg[df_seg['CLASIFICACION_3'] == val_c3]
                 procesar_agrupacion(df_c3, f"      {val_c3}", 'N3')
 
-    # 5. RESTO DE MARCAS CONFIGURADAS (PEPSICO, ALIMER, BARRAZA, ETC.)
+    # 5. RESTO DE MARCAS CONFIGURADAS
     else:
         grupo_1_2_3 = ['PEPSICO']
         grupo_1_3_4 = ['ALIMER S.A.', 'BARRAZA']
@@ -459,6 +462,13 @@ def generar_tabla_escalonada_proveedor(df_prov: pd.DataFrame, nombre_prov: str):
         else:
             df_resultado[c] = df_resultado[c].apply(lambda x: f"₡{x:,.2f}")
 
+    return df_resultado, tipos_fila
+
+def generar_tabla_escalonada_proveedor(df_prov: pd.DataFrame, nombre_prov: str):
+    df_resultado, tipos_fila = construir_datos_escalonados_proveedor(df_prov, nombre_prov)
+    if df_resultado is None or df_resultado.empty:
+        return
+
     def estilo_dark_escalonado(row):
         idx = row.name
         tipo = tipos_fila[idx]
@@ -486,119 +496,19 @@ def generar_tabla_escalonada_proveedor(df_prov: pd.DataFrame, nombre_prov: str):
     )
 
 # ---------------------------------------------------------
-# 4. Generador de PDF Completo
+# 4. Generador de PDF Completo en Base a Vista Actual
 # ---------------------------------------------------------
-def construir_datos_tabla_mensual_pdf(df_filtrado):
-    pivot_base = pd.pivot_table(
-        df_filtrado,
-        index=['MES_NUM', 'MES_NOMBRE'],
-        columns='ANIO',
-        values='VENTA_NETA',
-        aggfunc='sum',
-        fill_value=0
-    ).reset_index()
-
-    for a in [2024, 2025, 2026]:
-        if a not in pivot_base.columns:
-            pivot_base[a] = 0.0
-
-    pivot_base = pivot_base.sort_values('MES_NUM').drop(columns=['MES_NUM'])
-    pivot_base.rename(columns={'MES_NOMBRE': 'Mes'}, inplace=True)
-
-    fila_totales = {'Mes': 'TOTAL GENERAL', 2024: pivot_base[2024].sum(), 2025: pivot_base[2025].sum(), 2026: pivot_base[2026].sum()}
-    pivot_completa = pd.concat([pivot_base, pd.DataFrame([fila_totales])], ignore_index=True)
-
-    headers_pdf = ['Mes', '2024', '2025', 'Var % (25/24)', '2026', 'Var % (26/25)']
-    data_pdf = [headers_pdf]
-    
-    for _, row in pivot_completa.iterrows():
-        v25_24 = calcular_variacion(row[2025], row[2024])
-        v26_25 = calcular_variacion(row[2026], row[2025])
-        
-        fila_vals = [
-            str(row['Mes']),
-            f"{row[2024]:,.2f}",
-            f"{row[2025]:,.2f}",
-            f"{v25_24:+.1f}%",
-            f"{row[2026]:,.2f}",
-            f"{v26_25:+.1f}%"
-        ]
-        data_pdf.append(fila_vals)
-        
-    return data_pdf
-
-def construir_tabla_comparativa_pdf(df_sub: pd.DataFrame, col_group: str, titulo_col: str):
-    if df_sub.empty:
-        return None
-
-    pivot = pd.pivot_table(
-        df_sub,
-        index=col_group,
-        columns='ANIO',
-        values='VENTA_NETA',
-        aggfunc='sum',
-        fill_value=0
-    ).reset_index()
-
-    anios = sorted([col for col in pivot.columns if col != col_group])
-    if len(anios) == 0:
-        return None
-
-    headers = [titulo_col]
-    for anio in anios:
-        headers.append(str(anio))
-    if len(anios) >= 2:
-        headers.append(f"Var % ({str(anios[1])[-2:]}/{str(anios[0])[-2:]})")
-    if len(anios) >= 3:
-        headers.append(f"{anios[1]} ({anios[2]})")
-        headers.append(str(anios[2]))
-        headers.append(f"Var % ({str(anios[2])[-2:]}/{str(anios[1])[-2:]})")
-
+def formatear_dataframe_para_reportlab(df_tabla):
+    if df_tabla is None or df_tabla.empty:
+        return []
+    headers = list(df_tabla.columns)
     filas = [headers]
-
-    for _, row in pivot.iterrows():
-        fila = [str(row[col_group])[:25]]
-        for anio in anios:
-            fila.append(f"₡{row[anio]:,.0f}")
-        
-        if len(anios) >= 2:
-            v_var1 = calcular_variacion(row[anios[1]], row[anios[0]])
-            fila.append(f"{v_var1:+.1f}%")
-        
-        if len(anios) >= 3:
-            a2, a3 = anios[1], anios[2]
-            meses_a3 = df_sub[df_sub['ANIO'] == a3]['MES_NUM'].unique()
-            v_a2_per = df_sub[(df_sub['ANIO'] == a2) & (df_sub['MES_NUM'].isin(meses_a3)) & (df_sub[col_group] == row[col_group])]['VENTA_NETA'].sum()
-            v_a3_per = df_sub[(df_sub['ANIO'] == a3) & (df_sub['MES_NUM'].isin(meses_a3)) & (df_sub[col_group] == row[col_group])]['VENTA_NETA'].sum()
-            
-            fila.append(f"₡{v_a2_per:,.0f}")
-            fila.append(f"₡{v_a3_per:,.0f}")
-            v_var2 = calcular_variacion(v_a3_per, v_a2_per)
-            fila.append(f"{v_var2:+.1f}%")
-
-        filas.append(fila)
-
-    fila_tot = ['TOTAL']
-    for anio in anios:
-        fila_tot.append(f"₡{pivot[anio].sum():,.0f}")
-
-    if len(anios) >= 2:
-        tot_var1 = calcular_variacion(pivot[anios[1]].sum(), pivot[anios[0]].sum())
-        fila_tot.append(f"{tot_var1:+.1f}%")
-
-    if len(anios) >= 3:
-        a2, a3 = anios[1], anios[2]
-        meses_a3 = df_sub[df_sub['ANIO'] == a3]['MES_NUM'].unique()
-        v2_tot = df_sub[(df_sub['ANIO'] == a2) & (df_sub['MES_NUM'].isin(meses_a3))]['VENTA_NETA'].sum()
-        v3_tot = df_sub[(df_sub['ANIO'] == a3) & (df_sub['MES_NUM'].isin(meses_a3))]['VENTA_NETA'].sum()
-        fila_tot.append(f"₡{v2_tot:,.0f}")
-        fila_tot.append(f"₡{v3_tot:,.0f}")
-        fila_tot.append(f"{calcular_variacion(v3_tot, v2_tot):+.1f}%")
-
-    filas.append(fila_tot)
+    for _, row in df_tabla.iterrows():
+        fila_str = [str(val) for val in row.values]
+        filas.append(fila_str)
     return filas
 
-def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
+def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly, df_mensual_resultado, marcas_a_mostrar):
     if not REPORTLAB_DISPONIBLE:
         return None
     
@@ -606,7 +516,7 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
     doc = SimpleDocTemplate(
         buffer, 
         pagesize=A4,
-        rightMargin=12, leftMargin=12, topMargin=15, bottomMargin=15
+        rightMargin=15, leftMargin=15, topMargin=15, bottomMargin=15
     )
     
     story = []
@@ -619,16 +529,26 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
         textColor=colors.HexColor("#00174F"),
         spaceAfter=3
     )
-    style_subtitle = ParagraphStyle(
-        'SubTitleStyle',
+    style_section = ParagraphStyle(
+        'SectionStyle',
         parent=styles['Heading2'],
         fontSize=9,
         textColor=colors.HexColor("#009640"),
         spaceAfter=3,
-        spaceBefore=5,
+        spaceBefore=6,
+        keepWithNext=True
+    )
+    style_subsection = ParagraphStyle(
+        'SubSectionStyle',
+        parent=styles['Heading3'],
+        fontSize=7.5,
+        textColor=colors.HexColor("#00174F"),
+        spaceAfter=2,
+        spaceBefore=4,
         keepWithNext=True
     )
 
+    # 1. Cabecera
     story.append(Paragraph(f"<b>Informe Ejecutivo Sedisur BI - {seleccion_actual}</b>", style_title))
     story.append(Paragraph(f"Generado el: {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles['Normal']))
     
@@ -641,80 +561,114 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
     if len(vendedores_unicos) == 1 and pd.notna(vendedores_unicos[0]):
         story.append(Paragraph(f"<b>Vendedor:</b> {vendedores_unicos[0]}", styles['Normal']))
 
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 4))
 
-    style_table_gen = TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#00174F")),
-        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
-        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-        ('ALIGN', (0,1), (0,-1), 'LEFT'),
-        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0,0), (-1,0), 6),
-        ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#e2efda")),
-        ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-        ('FONTSIZE', (0,1), (-1,-1), 5.5),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
-        ('TOPPADDING', (0,0), (-1,-1), 2),
-    ])
+    # 2. Tabla Comparativa por Mes y Variación Porcentual
+    if df_mensual_resultado is not None and not df_mensual_resultado.empty:
+        story.append(Paragraph("<b>1. Tabla Comparativa por Mes y Variación Porcentual</b>", style_section))
+        data_mensual = formatear_dataframe_para_reportlab(df_mensual_resultado)
+        num_cols = len(data_mensual[0])
+        col_w = [65] + [(500 - 65) / (num_cols - 1)] * (num_cols - 1)
+        
+        t_mensual = Table(data_mensual, colWidths=col_w)
+        t_mensual.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#00174F")),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('ALIGN', (0,1), (0,-1), 'LEFT'),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,0), (-1,-1), 5.5),
+            ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#e2efda")),
+            ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 1.5),
+            ('TOPPADDING', (0,0), (-1,-1), 1.5),
+        ]))
+        story.append(KeepTogether([t_mensual]))
+        story.append(Spacer(1, 4))
 
-    # 1. Evolución Mensual
-    titulo_gen = Paragraph(f"<b>1. Evolución Mensual y Variaciones Interanuales - {seleccion_actual}</b>", style_subtitle)
-    data_gen = construir_datos_tabla_mensual_pdf(df_analisis)
-    t_gen = Table(data_gen, colWidths=[60, 70, 70, 65, 70, 65])
-    t_gen.setStyle(style_table_gen)
-    story.append(KeepTogether([titulo_gen, t_gen]))
-    story.append(Spacer(1, 6))
-
-    # 2. Gráfica
+    # 3. Tendencia Evolutiva Mensual (Gráfico Plotly)
     try:
-        img_bytes = fig_plotly.to_image(format="png", width=650, height=220, scale=2)
+        img_bytes = fig_plotly.to_image(format="png", width=700, height=200, scale=2)
         img_io = io.BytesIO(img_bytes)
-        titulo_img = Paragraph("<b>2. Tendencia Gráfica Evolutiva</b>", style_subtitle)
-        story.append(KeepTogether([titulo_img, RLImage(img_io, width=420, height=140)]))
-        story.append(Spacer(1, 6))
+        story.append(Paragraph("<b>2. Tendencia Evolutiva Mensual</b>", style_section))
+        story.append(KeepTogether([RLImage(img_io, width=480, height=135)]))
+        story.append(Spacer(1, 4))
     except Exception:
         pass
 
-    # 3. Comparativa por Proveedores
-    marca_rest = st.session_state.get("marca_restringida")
-    if not marca_rest and seleccion_actual == "📊 Consolidado General (Sedisur)":
-        data_c1 = construir_tabla_comparativa_pdf(df_analisis, 'CLASIFICACION_1', 'Proveedor')
-        if data_c1:
-            num_cols = len(data_c1[0])
-            col_widths = [110] + [50] * (num_cols - 1)
-            titulo_c1 = Paragraph("<b>3. Comparativa por Proveedores (Consolidado Sedisur)</b>", style_subtitle)
-            t_c1 = Table(data_c1, colWidths=col_widths)
-            t_c1.setStyle(style_table_gen)
-            story.append(KeepTogether([titulo_c1, t_c1]))
-            story.append(Spacer(1, 6))
+    # 4. Sección: Comparativa por Proveedores y Sub-Marcas Escalonadas
+    story.append(Paragraph("<b>3. Comparativa por Proveedores y Sub-Marcas Escalonadas</b>", style_section))
 
-    # 4. Detalle por Submarcas / Clasificaciones
-    proveedores_en_df = df_analisis['CLASIFICACION_1'].dropna().unique()
-    proveedores_a_procesar = [marca_rest] if marca_rest else list(proveedores_en_df)
+    # Resumen General Proveedores (Solo si está en Consolidado General)
+    if seleccion_actual == "📊 Consolidado General (Sedisur)":
+        df_resumen_gen = obtener_datos_comparativa_formateada(df_analisis, 'CLASIFICACION_1', 'Resumen General Proveedores')
+        if df_resumen_gen is not None and not df_resumen_gen.empty:
+            data_res = formatear_dataframe_para_reportlab(df_resumen_gen)
+            num_cols_res = len(data_res[0])
+            col_w_res = [100] + [(500 - 100) / (num_cols_res - 1)] * (num_cols_res - 1)
+            
+            t_res = Table(data_res, colWidths=col_w_res)
+            t_res.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#00174F")),
+                ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                ('ALIGN', (0,1), (0,-1), 'LEFT'),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0,0), (-1,-1), 5.5),
+                ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#e2efda")),
+                ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 1.5),
+                ('TOPPADDING', (0,0), (-1,-1), 1.5),
+            ]))
+            story.append(KeepTogether([
+                Paragraph("<b>Resumen General Proveedores</b>", style_subsection),
+                t_res,
+                Spacer(1, 4)
+            ]))
 
-    story.append(Paragraph("<b>4. Detalle por Clasificación / Sub-Marcas</b>", style_subtitle))
-    for prov in proveedores_a_procesar:
-        df_sub_prov = df_analisis[df_analisis['CLASIFICACION_1'].str.strip() == prov.strip()]
-        if not df_sub_prov.empty:
-            if prov.strip() == 'HEINZ.CR':
-                col_detalle = 'HEINZ_CATEGORIA'
-            elif prov.strip() == 'RECKITT':
-                col_detalle = 'RECKITT_SEGMENTO'
-            elif prov.strip() in ['ALIMER S.A.', 'BARRAZA']:
-                col_detalle = 'CLASIFICACION_3'
-            else:
-                col_detalle = 'CLASIFICACION_2'
+    # Todos los Detalles Escalonados que se muestran en pantalla
+    for prov_marca in marcas_a_mostrar:
+        df_prov_filtrado = df_analisis[df_analisis['CLASIFICACION_1'].str.strip() == prov_marca.strip()]
+        if not df_prov_filtrado.empty:
+            df_esc, tipos_f = construir_datos_escalonados_proveedor(df_prov_filtrado, prov_marca)
+            if df_esc is not None and not df_esc.empty:
+                data_esc = formatear_dataframe_para_reportlab(df_esc)
+                num_cols_esc = len(data_esc[0])
+                col_w_esc = [120] + [(500 - 120) / (num_cols_esc - 1)] * (num_cols_esc - 1)
+                
+                # Definir estilos por jerarquía de filas en el PDF
+                estilos_tabla_esc = [
+                    ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#00174F")),
+                    ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+                    ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                    ('ALIGN', (0,1), (0,-1), 'LEFT'),
+                    ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0,0), (-1,-1), 5.5),
+                    ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cccccc")),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 1.5),
+                    ('TOPPADDING', (0,0), (-1,-1), 1.5),
+                ]
 
-            data_sub = construir_tabla_comparativa_pdf(df_sub_prov, col_detalle, f'Clasificación: {prov}')
-            if data_sub and len(data_sub) > 2:
-                num_cols = len(data_sub[0])
-                col_widths = [110] + [50] * (num_cols - 1)
-                t_sub = Table(data_sub, colWidths=col_widths)
-                t_sub.setStyle(style_table_gen)
+                for row_idx, tipo in enumerate(tipos_f, start=1):
+                    if tipo == 'N1':
+                        estilos_tabla_esc.extend([
+                            ('BACKGROUND', (0, row_idx), (-1, row_idx), colors.HexColor("#e2efda")),
+                            ('FONTNAME', (0, row_idx), (-1, row_idx), 'Helvetica-Bold')
+                        ])
+                    elif tipo == 'N2':
+                        estilos_tabla_esc.extend([
+                            ('BACKGROUND', (0, row_idx), (-1, row_idx), colors.HexColor("#f2f4f7")),
+                            ('FONTNAME', (0, row_idx), (-1, row_idx), 'Helvetica-Bold')
+                        ])
+
+                t_esc = Table(data_esc, colWidths=col_w_esc)
+                t_esc.setStyle(TableStyle(estilos_tabla_esc))
+                
                 story.append(KeepTogether([
-                    Paragraph(f"<b>Detalle Subclasificaciones: {prov}</b>", ParagraphStyle('ProvHead', parent=styles['Normal'], fontSize=8, textColor=colors.HexColor("#333333"), spaceBefore=3, spaceAfter=2)),
-                    t_sub,
+                    Paragraph(f"<b>Detalle Escalonado: {prov_marca}</b>", style_subsection),
+                    t_esc,
                     Spacer(1, 4)
                 ]))
 
@@ -879,11 +833,10 @@ def mostrar_vista_comparativa(df: pd.DataFrame, df_raw_completo: pd.DataFrame):
 
     columna_y = 'VENTA_NETA' if tipo_grafico == "Venta Neta (₡)" else 'CANTIDAD_NETA'
 
-    # Paleta Corporativa Sedisur
     colores_anios = {
-        '2024': '#8A9BA8',  # Gris base
-        '2025': '#00174F',  # Azul Sedisur
-        '2026': '#009640'   # Verde Sedisur
+        '2024': '#8A9BA8',
+        '2025': '#00174F',
+        '2026': '#009640'
     }
 
     fig = px.line(
@@ -916,10 +869,6 @@ def mostrar_vista_comparativa(df: pd.DataFrame, df_raw_completo: pd.DataFrame):
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    pdf_buffer_global = None
-    if REPORTLAB_DISPONIBLE:
-        pdf_buffer_global = generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig)
-
     st.divider()
     st.header("🏢 Comparativa por Proveedores y Sub-Marcas Escalonadas")
 
@@ -928,10 +877,13 @@ def mostrar_vista_comparativa(df: pd.DataFrame, df_raw_completo: pd.DataFrame):
         'ALIMER S.A.', 'BARRAZA', 'HEINZ.CR'
     ]
 
+    marcas_renderizadas = []
+
     if marca_restriccion:
         if marca_restriccion in marcas_autorizadas_escalonadas:
             df_base_proveedor = df_raw_completo[df_raw_completo['CLASIFICACION_1'].str.strip() == marca_restriccion]
             generar_tabla_escalonada_proveedor(df_base_proveedor, marca_restriccion)
+            marcas_renderizadas.append(marca_restriccion)
     else:
         if seleccion_actual == "📊 Consolidado General (Sedisur)":
             generar_tabla_comparativa_formateada(df_analisis, 'CLASIFICACION_1', 'Resumen General Proveedores')
@@ -944,11 +896,24 @@ def mostrar_vista_comparativa(df: pd.DataFrame, df_raw_completo: pd.DataFrame):
                     df_prov = df_analisis[df_analisis['CLASIFICACION_1'].str.strip() == prov_limpio]
                     if not df_prov.empty:
                         generar_tabla_escalonada_proveedor(df_prov, prov_limpio)
+                        marcas_renderizadas.append(prov_limpio)
                         st.markdown("<br>", unsafe_allow_html=True)
         else:
             proveedor_seleccionado = seleccion_actual.replace("Proveedor: ", "").strip()
             if proveedor_seleccionado in marcas_autorizadas_escalonadas:
                 generar_tabla_escalonada_proveedor(df_analisis, proveedor_seleccionado)
+                marcas_renderizadas.append(proveedor_seleccionado)
+
+    # Generar PDF que incluye exactamente las tablas y gráficos renderizados en pantalla
+    pdf_buffer_global = None
+    if REPORTLAB_DISPONIBLE:
+        pdf_buffer_global = generar_pdf_reporte_completo(
+            df_analisis=df_analisis,
+            seleccion_actual=seleccion_actual,
+            fig_plotly=fig,
+            df_mensual_resultado=df_resultado,
+            marcas_a_mostrar=marcas_renderizadas
+        )
 
     return pdf_buffer_global
 
