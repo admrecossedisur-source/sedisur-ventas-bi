@@ -175,11 +175,13 @@ def cargar_datos_exactus():
     df['CLIENTE'] = df['CLIENTE'].astype(str).str.strip()
     df['CLIENTE_DISPLAY'] = df['CLIENTE'] + " - " + df['ALIAS'].astype(str)
 
+    # Agrupación estricta para HEINZ.CR
     mascara_heinz = df['CLASIFICACION_1'].astype(str).str.strip() == 'HEINZ.CR'
     df['HEINZ_CATEGORIA'] = None
     if mascara_heinz.any():
         df.loc[mascara_heinz, 'HEINZ_CATEGORIA'] = df.loc[mascara_heinz, 'CLASIFICACION_4'].apply(clasificar_categoria_heinz_estricta)
 
+    # Agrupación CORE / VASTACY para RECKITT
     mascara_reckitt = df['CLASIFICACION_1'].astype(str).str.strip() == 'RECKITT'
     df['RECKITT_SEGMENTO'] = None
     if mascara_reckitt.any():
@@ -496,17 +498,34 @@ def generar_tabla_escalonada_proveedor(df_prov: pd.DataFrame, nombre_prov: str):
     )
 
 # ---------------------------------------------------------
-# 4. Generador de PDF Completo (Sin Símbolo de Moneda ₡)
+# 4. Generador de PDF Completo (Sin Decimales y Sin Colisión)
 # ---------------------------------------------------------
-def formatear_dataframe_para_reportlab_sin_moneda(df_tabla):
+def formatear_dataframe_para_reportlab_limpio(df_tabla):
     if df_tabla is None or df_tabla.empty:
         return []
     headers = list(df_tabla.columns)
     filas = [headers]
     for _, row in df_tabla.iterrows():
-        fila_str = [str(val).replace('₡', '').strip() for val in row.values]
+        fila_str = []
+        for col_name, val in row.items():
+            val_str = str(val).replace('₡', '').strip()
+            # Si es un número con formato de moneda (ej: 591,193,120.45), quitar decimales para que quepa perfecto
+            if '.' in val_str and not val_str.endswith('%'):
+                try:
+                    num_float = float(val_str.replace(',', ''))
+                    val_str = f"{num_float:,.0f}"
+                except ValueError:
+                    pass
+            fila_str.append(val_str)
         filas.append(fila_str)
     return filas
+
+def calcular_anchos_columnas_pdf(num_cols, ancho_disponible=565):
+    if num_cols <= 1:
+        return [ancho_disponible]
+    ancho_concepto = 165
+    ancho_resto = (ancho_disponible - ancho_concepto) / (num_cols - 1)
+    return [ancho_concepto] + [ancho_resto] * (num_cols - 1)
 
 def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly, df_mensual_resultado, marcas_a_mostrar):
     if not REPORTLAB_DISPONIBLE:
@@ -525,26 +544,26 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly, df_m
     style_title = ParagraphStyle(
         'TitleStyle',
         parent=styles['Heading1'],
-        fontSize=12,
+        fontSize=11,
         textColor=colors.HexColor("#00174F"),
-        spaceAfter=3
+        spaceAfter=2
     )
     style_section = ParagraphStyle(
         'SectionStyle',
         parent=styles['Heading2'],
-        fontSize=9,
+        fontSize=8.5,
         textColor=colors.HexColor("#009640"),
-        spaceAfter=3,
-        spaceBefore=6,
+        spaceAfter=2,
+        spaceBefore=5,
         keepWithNext=True
     )
     style_subsection = ParagraphStyle(
         'SubSectionStyle',
         parent=styles['Heading3'],
-        fontSize=7.5,
+        fontSize=7,
         textColor=colors.HexColor("#00174F"),
-        spaceAfter=2,
-        spaceBefore=4,
+        spaceAfter=1.5,
+        spaceBefore=3,
         keepWithNext=True
     )
 
@@ -566,33 +585,34 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly, df_m
     # 2. Tabla Comparativa por Mes y Variación Porcentual
     if df_mensual_resultado is not None and not df_mensual_resultado.empty:
         story.append(Paragraph("<b>1. Tabla Comparativa por Mes y Variación Porcentual</b>", style_section))
-        data_mensual = formatear_dataframe_para_reportlab_sin_moneda(df_mensual_resultado)
-        num_cols = len(data_mensual[0])
-        col_w = [65] + [(500 - 65) / (num_cols - 1)] * (num_cols - 1)
+        data_mensual = formatear_dataframe_para_reportlab_limpio(df_mensual_resultado)
+        col_w_m = calcular_anchos_columnas_pdf(len(data_mensual[0]), ancho_disponible=565)
         
-        t_mensual = Table(data_mensual, colWidths=col_w)
+        t_mensual = Table(data_mensual, colWidths=col_w_m)
         t_mensual.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#00174F")),
             ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
             ('ALIGN', (0,1), (0,-1), 'LEFT'),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0,0), (-1,0), 5.5),
+            ('FONTSIZE', (0,0), (-1,-1), 5),
             ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#e2efda")),
             ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
-            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 1.5),
-            ('TOPPADDING', (0,0), (-1,-1), 1.5),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cccccc")),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+            ('TOPPADDING', (0,0), (-1,-1), 1),
+            ('LEFTPADDING', (0,0), (-1,-1), 2),
+            ('RIGHTPADDING', (0,0), (-1,-1), 2),
         ]))
         story.append(KeepTogether([t_mensual]))
         story.append(Spacer(1, 4))
 
     # 3. Tendencia Evolutiva Mensual (Gráfico Plotly)
     try:
-        img_bytes = fig_plotly.to_image(format="png", width=700, height=200, scale=2)
+        img_bytes = fig_plotly.to_image(format="png", width=750, height=200, scale=2)
         img_io = io.BytesIO(img_bytes)
         story.append(Paragraph("<b>2. Tendencia Evolutiva Mensual</b>", style_section))
-        story.append(KeepTogether([RLImage(img_io, width=480, height=135)]))
+        story.append(KeepTogether([RLImage(img_io, width=500, height=133)]))
         story.append(Spacer(1, 4))
     except Exception:
         pass
@@ -604,9 +624,8 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly, df_m
     if seleccion_actual == "📊 Consolidado General (Sedisur)":
         df_resumen_gen = obtener_datos_comparativa_formateada(df_analisis, 'CLASIFICACION_1', 'Resumen General Proveedores')
         if df_resumen_gen is not None and not df_resumen_gen.empty:
-            data_res = formatear_dataframe_para_reportlab_sin_moneda(df_resumen_gen)
-            num_cols_res = len(data_res[0])
-            col_w_res = [100] + [(500 - 100) / (num_cols_res - 1)] * (num_cols_res - 1)
+            data_res = formatear_dataframe_para_reportlab_limpio(df_resumen_gen)
+            col_w_res = calcular_anchos_columnas_pdf(len(data_res[0]), ancho_disponible=565)
             
             t_res = Table(data_res, colWidths=col_w_res)
             t_res.setStyle(TableStyle([
@@ -615,17 +634,19 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly, df_m
                 ('ALIGN', (0,0), (-1,-1), 'CENTER'),
                 ('ALIGN', (0,1), (0,-1), 'LEFT'),
                 ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0,0), (-1,0), 5.5),
+                ('FONTSIZE', (0,0), (-1,-1), 5),
                 ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#e2efda")),
                 ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
-                ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-                ('BOTTOMPADDING', (0,0), (-1,-1), 1.5),
-                ('TOPPADDING', (0,0), (-1,-1), 1.5),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cccccc")),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+                ('TOPPADDING', (0,0), (-1,-1), 1),
+                ('LEFTPADDING', (0,0), (-1,-1), 2),
+                ('RIGHTPADDING', (0,0), (-1,-1), 2),
             ]))
             story.append(KeepTogether([
                 Paragraph("<b>Resumen General Proveedores</b>", style_subsection),
                 t_res,
-                Spacer(1, 4)
+                Spacer(1, 3)
             ]))
 
     # Todos los Detalles Escalonados activos en pantalla
@@ -634,9 +655,8 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly, df_m
         if not df_prov_filtrado.empty:
             df_esc, tipos_f = construir_datos_escalonados_proveedor(df_prov_filtrado, prov_marca)
             if df_esc is not None and not df_esc.empty:
-                data_esc = formatear_dataframe_para_reportlab_sin_moneda(df_esc)
-                num_cols_esc = len(data_esc[0])
-                col_w_esc = [120] + [(500 - 120) / (num_cols_esc - 1)] * (num_cols_esc - 1)
+                data_esc = formatear_dataframe_para_reportlab_limpio(df_esc)
+                col_w_esc = calcular_anchos_columnas_pdf(len(data_esc[0]), ancho_disponible=565)
                 
                 estilos_tabla_esc = [
                     ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#00174F")),
@@ -644,10 +664,12 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly, df_m
                     ('ALIGN', (0,0), (-1,-1), 'CENTER'),
                     ('ALIGN', (0,1), (0,-1), 'LEFT'),
                     ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0,0), (-1,0), 5.5),
-                    ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cccccc")),
-                    ('BOTTOMPADDING', (0,0), (-1,-1), 1.5),
-                    ('TOPPADDING', (0,0), (-1,-1), 1.5),
+                    ('FONTSIZE', (0,0), (-1,-1), 5),
+                    ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#dddddd")),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+                    ('TOPPADDING', (0,0), (-1,-1), 1),
+                    ('LEFTPADDING', (0,0), (-1,-1), 2),
+                    ('RIGHTPADDING', (0,0), (-1,-1), 2),
                 ]
 
                 for row_idx, tipo in enumerate(tipos_f, start=1):
@@ -668,7 +690,7 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly, df_m
                 story.append(KeepTogether([
                     Paragraph(f"<b>Detalle Escalonado: {prov_marca}</b>", style_subsection),
                     t_esc,
-                    Spacer(1, 4)
+                    Spacer(1, 3)
                 ]))
 
     doc.build(story)
