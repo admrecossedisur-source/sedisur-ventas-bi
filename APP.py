@@ -57,7 +57,7 @@ def verificar_acceso():
         with st.form("form_login"):
             correo = st.text_input("Usuario").strip().lower()
             password = st.text_input("Contraseña", type="password")
-            submit = st.form_submit_button("Ingresar", width='stretch')
+            submit = st.form_submit_button("Ingresar", use_container_width=True)
 
             if submit:
                 if correo in USUARIOS_PERMITIDOS and USUARIOS_PERMITIDOS[correo]["password"] == password:
@@ -79,7 +79,7 @@ def verificar_acceso():
     return False
 
 # ---------------------------------------------------------
-# 1. Configuración Inicial de la Página
+# 1. Configuración Inicial de la Página e Identidad Sedisur
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="Sedisur BI - Comparativa y Cobertura",
@@ -87,9 +87,56 @@ st.set_page_config(
     layout="wide"
 )
 
+# Estilos corporativos Sedisur (Azul #00174F, Verde #009640)
+st.markdown("""
+    <style>
+        span[data-baseweb="tag"] {
+            background-color: #00174F !important;
+            border: 1px solid #009640 !important;
+            color: #ffffff !important;
+        }
+        details summary span p {
+            color: #009640 !important;
+            font-weight: bold !important;
+        }
+        .stButton>button {
+            border: 1px solid #00174F !important;
+            transition: all 0.3s ease;
+        }
+        .stButton>button:hover {
+            border-color: #009640 !important;
+            color: #009640 !important;
+        }
+        div[role="radiogroup"] label[data-baseweb="radio"] span:first-child {
+            border-color: #009640 !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 # ---------------------------------------------------------
-# 2. Carga de Datos Segura Dividida por Años
+# 2. Carga de Datos y Agrupaciones Personalizadas
 # ---------------------------------------------------------
+def clasificar_categoria_heinz_estricta(c4_val):
+    c4 = str(c4_val).upper().strip()
+    if 'MAYO' in c4:
+        return 'MAYONESA'
+    elif any(k in c4 for k in ['KETCHUP', 'TOMATE', 'CATSUP', 'K_CHUP']):
+        return 'KETCHUP'
+    elif any(k in c4 for k in ['COLADO', 'GERBER', 'PAPILLA']):
+        return 'COLADOS'
+    elif any(k in c4 for k in ['SALSITA', 'SALSA PREPARADA', 'SOFRITO', 'RANCHERA', 'BOLOGNESA', 'MECHADA', 'POMODORO']):
+        return 'SALSITAS'
+    else:
+        return 'OTROS'
+
+def clasificar_segmento_reckitt(c3_val):
+    c3 = str(c3_val).upper().strip()
+    marcas_core = ['DUREX', 'HARPIC', 'LYSOL', 'VANISH', 'VEET']
+    if any(m in c3 for m in marcas_core):
+        return 'CORE'
+    else:
+        return 'VASTACY'
+
 @st.cache_data
 def cargar_datos_exactus():
     anios_a_cargar = [2024, 2025, 2026]
@@ -128,7 +175,19 @@ def cargar_datos_exactus():
     df['CLIENTE'] = df['CLIENTE'].astype(str).str.strip()
     df['CLIENTE_DISPLAY'] = df['CLIENTE'] + " - " + df['ALIAS'].astype(str)
 
-    cols_cat = ['CLASIFICACION_1', 'CLASIFICACION_2', 'CATEGORIA_CLIENTE', 'VENDEDOR']
+    # 1. Agrupación estricta para HEINZ.CR
+    mascara_heinz = df['CLASIFICACION_1'].astype(str).str.strip() == 'HEINZ.CR'
+    df['HEINZ_CATEGORIA'] = None
+    if mascara_heinz.any():
+        df.loc[mascara_heinz, 'HEINZ_CATEGORIA'] = df.loc[mascara_heinz, 'CLASIFICACION_4'].apply(clasificar_categoria_heinz_estricta)
+
+    # 2. Agrupación CORE / VASTACY para RECKITT
+    mascara_reckitt = df['CLASIFICACION_1'].astype(str).str.strip() == 'RECKITT'
+    df['RECKITT_SEGMENTO'] = None
+    if mascara_reckitt.any():
+        df.loc[mascara_reckitt, 'RECKITT_SEGMENTO'] = df.loc[mascara_reckitt, 'CLASIFICACION_3'].apply(clasificar_segmento_reckitt)
+
+    cols_cat = ['CLASIFICACION_1', 'CLASIFICACION_2', 'CLASIFICACION_3', 'CLASIFICACION_4', 'CATEGORIA_CLIENTE', 'VENDEDOR']
     for c in cols_cat:
         if c in df.columns:
             df[c] = df[c].astype('category')
@@ -156,7 +215,7 @@ def cargar_datos_canales():
     return pd.DataFrame(columns=['CLIENTE', 'CANAL'])
 
 # ---------------------------------------------------------
-# 3. Funciones de Apoyo (Cálculos y Tablas)
+# 3. Funciones de Apoyo y Tablas Escalonadas Tema Oscuro
 # ---------------------------------------------------------
 def calcular_variacion(actual, anterior):
     if anterior == 0 or pd.isna(anterior):
@@ -168,9 +227,9 @@ def resaltar_variaciones(val):
         try:
             num = float(val.replace('%', '').replace('+', '').strip())
             if num > 0:
-                return 'color: #2e7d32; font-weight: bold;'
+                return 'color: #00c853; font-weight: bold;'
             elif num < 0:
-                return 'color: #c62828; font-weight: bold;'
+                return 'color: #f87171; font-weight: bold;'
         except ValueError:
             pass
     return ''
@@ -245,13 +304,186 @@ def generar_tabla_comparativa_formateada(df_sub: pd.DataFrame, col_group: str, t
     st.subheader(f"🏷️ {titulo}")
     st.dataframe(
         styler,
-        width='stretch',
+        use_container_width=True,
         hide_index=True,
         height=(len(res_completo) + 1) * 35 + 5
     )
 
+def generar_tabla_escalonada_proveedor(df_prov: pd.DataFrame, nombre_prov: str):
+    if df_prov.empty:
+        return
+
+    anios = sorted(df_prov['ANIO'].unique())
+    if not anios:
+        return
+
+    meses_a3 = df_prov[df_prov['ANIO'] == anios[2]]['MES_NUM'].unique() if len(anios) >= 3 else []
+
+    filas = []
+    tipos_fila = []
+
+    def procesar_agrupacion(df_segmento, etiqueta, tipo):
+        datos = {'Concepto': etiqueta}
+        ventas_por_anio = df_segmento.groupby('ANIO')['VENTA_NETA'].sum().to_dict()
+
+        for a in anios:
+            datos[str(a)] = ventas_por_anio.get(a, 0.0)
+
+        if len(anios) >= 2:
+            a1, a2 = anios[0], anios[1]
+            datos['IND'] = calcular_variacion(datos[str(a2)], datos[str(a1)])
+
+        if len(anios) >= 3:
+            a2, a3 = anios[1], anios[2]
+            v_a2_per = df_segmento[(df_segmento['ANIO'] == a2) & (df_segmento['MES_NUM'].isin(meses_a3))]['VENTA_NETA'].sum()
+            v_a3_per = df_segmento[(df_segmento['ANIO'] == a3) & (df_segmento['MES_NUM'].isin(meses_a3))]['VENTA_NETA'].sum()
+            datos[f"{a2} ({a3})"] = v_a2_per
+            datos[str(a3)] = v_a3_per
+            datos['IND '] = calcular_variacion(v_a3_per, v_a2_per)
+
+        filas.append(datos)
+        tipos_fila.append(tipo)
+
+    # N1: Proveedor Cabecera Principal
+    procesar_agrupacion(df_prov, f"{nombre_prov}", 'N1')
+
+    # 1. CASO COLGATE_PALM: Clasif 1 -> Clasif 2 -> Clasif 4 -> Clasif 3 (Excepto 'CUIDADO BEBE')
+    if nombre_prov == 'COLGATE_PALM':
+        c2_unicos = sorted([x for x in df_prov['CLASIFICACION_2'].dropna().unique() if str(x).strip() != ''])
+        for val_c2 in c2_unicos:
+            df_c2 = df_prov[df_prov['CLASIFICACION_2'] == val_c2]
+            procesar_agrupacion(df_c2, f"{val_c2}", 'N2')
+            
+            # Si es CUIDADO BEBE, no desglosar clasificaciones 3 y 4
+            val_c2_limpio = str(val_c2).upper().replace('_', ' ').strip()
+            if val_c2_limpio == 'CUIDADO BEBE':
+                continue
+
+            c4_unicos = sorted([x for x in df_c2['CLASIFICACION_4'].dropna().unique() if str(x).strip() != ''])
+            for val_c4 in c4_unicos:
+                df_c4 = df_c2[df_c2['CLASIFICACION_4'] == val_c4]
+                procesar_agrupacion(df_c4, f"      {val_c4}", 'N3')
+                
+                c3_unicos = sorted([x for x in df_c4['CLASIFICACION_3'].dropna().unique() if str(x).strip() != ''])
+                for val_c3 in c3_unicos:
+                    df_c3 = df_c4[df_c4['CLASIFICACION_3'] == val_c3]
+                    procesar_agrupacion(df_c3, f"            {val_c3}", 'N4')
+
+    # 2. CASO ESSITY: Clasif 1 -> Clasif 2 -> Clasif 3 -> Clasif 4
+    elif nombre_prov == 'ESSITY':
+        c2_unicos = sorted([x for x in df_prov['CLASIFICACION_2'].dropna().unique() if str(x).strip() != ''])
+        for val_c2 in c2_unicos:
+            df_c2 = df_prov[df_prov['CLASIFICACION_2'] == val_c2]
+            procesar_agrupacion(df_c2, f"{val_c2}", 'N2')
+            
+            c3_unicos = sorted([x for x in df_c2['CLASIFICACION_3'].dropna().unique() if str(x).strip() != ''])
+            for val_c3 in c3_unicos:
+                df_c3 = df_c2[df_c2['CLASIFICACION_3'] == val_c3]
+                procesar_agrupacion(df_c3, f"      {val_c3}", 'N3')
+                
+                c4_unicos = sorted([x for x in df_c3['CLASIFICACION_4'].dropna().unique() if str(x).strip() != ''])
+                for val_c4 in c4_unicos:
+                    df_c4 = df_c3[df_c3['CLASIFICACION_4'] == val_c4]
+                    procesar_agrupacion(df_c4, f"            {val_c4}", 'N4')
+
+    # 3. CASO HEINZ.CR: Clasif 1 -> HEINZ_CATEGORIA -> Clasif 4 -> Clasif 3
+    elif nombre_prov == 'HEINZ.CR':
+        orden_heinz = ['MAYONESA', 'KETCHUP', 'COLADOS', 'SALSITAS', 'OTROS']
+        heinz_cats_presentes = [c for c in orden_heinz if c in df_prov['HEINZ_CATEGORIA'].dropna().unique()]
+        
+        for cat_heinz in heinz_cats_presentes:
+            df_cat = df_prov[df_prov['HEINZ_CATEGORIA'] == cat_heinz]
+            procesar_agrupacion(df_cat, f"{cat_heinz}", 'N2')
+            
+            c4_unicos = sorted([x for x in df_cat['CLASIFICACION_4'].dropna().unique() if str(x).strip() != ''])
+            for val_c4 in c4_unicos:
+                df_c4 = df_cat[df_cat['CLASIFICACION_4'] == val_c4]
+                procesar_agrupacion(df_c4, f"      {val_c4}", 'N3')
+                
+                c3_unicos = sorted([x for x in df_cat['CLASIFICACION_3'].dropna().unique() if str(x).strip() != ''])
+                for val_c3 in c3_unicos:
+                    df_c3 = df_c4[df_c4['CLASIFICACION_3'] == val_c3]
+                    procesar_agrupacion(df_c3, f"            {val_c3}", 'N4')
+
+    # 4. CASO RECKITT: Clasif 1 -> CORE / VASTACY -> Clasif 3
+    elif nombre_prov == 'RECKITT':
+        orden_reckitt = ['CORE', 'VASTACY']
+        reckitt_presentes = [r for r in orden_reckitt if r in df_prov['RECKITT_SEGMENTO'].dropna().unique()]
+        
+        for seg_reckitt in reckitt_presentes:
+            df_seg = df_prov[df_prov['RECKITT_SEGMENTO'] == seg_reckitt]
+            procesar_agrupacion(df_seg, f"{seg_reckitt}", 'N2')
+            
+            c3_unicos = sorted([x for x in df_seg['CLASIFICACION_3'].dropna().unique() if str(x).strip() != ''])
+            for val_c3 in c3_unicos:
+                df_c3 = df_seg[df_seg['CLASIFICACION_3'] == val_c3]
+                procesar_agrupacion(df_c3, f"      {val_c3}", 'N3')
+
+    # 5. RESTO DE MARCAS CONFIGURADAS (PEPSICO, ALIMER, BARRAZA, ETC.)
+    else:
+        grupo_1_2_3 = ['PEPSICO']
+        grupo_1_3_4 = ['ALIMER S.A.', 'BARRAZA']
+
+        if nombre_prov in grupo_1_2_3:
+            cols_niveles = ['CLASIFICACION_2', 'CLASIFICACION_3']
+        elif nombre_prov in grupo_1_3_4:
+            cols_niveles = ['CLASIFICACION_3', 'CLASIFICACION_4']
+        else:
+            cols_niveles = ['CLASIFICACION_2']
+
+        col_n2 = cols_niveles[0]
+        n2_unicos = sorted([x for x in df_prov[col_n2].dropna().unique() if str(x).strip() != ''])
+
+        for val_n2 in n2_unicos:
+            df_n2 = df_prov[df_prov[col_n2] == val_n2]
+            procesar_agrupacion(df_n2, f"{val_n2}", 'N2')
+
+            if len(cols_niveles) > 1:
+                col_n3 = cols_niveles[1]
+                if col_n3 in df_n2.columns:
+                    n3_unicos = sorted([x for x in df_n2[col_n3].dropna().unique() if str(x).strip() != ''])
+                    for val_n3 in n3_unicos:
+                        df_n3 = df_n2[df_n2[col_n3] == val_n3]
+                        procesar_agrupacion(df_n3, f"      {val_n3}", 'N3')
+
+    df_resultado = pd.DataFrame(filas)
+
+    for c in df_resultado.columns:
+        if c in ['Concepto']:
+            continue
+        elif 'IND' in c:
+            df_resultado[c] = df_resultado[c].apply(lambda x: f"{x:+.1f}%" if x != 0 else "0.0%")
+        else:
+            df_resultado[c] = df_resultado[c].apply(lambda x: f"₡{x:,.2f}")
+
+    def estilo_dark_escalonado(row):
+        idx = row.name
+        tipo = tipos_fila[idx]
+        if tipo == 'N1':
+            return ['background-color: #111927; color: #ffffff; font-weight: bold; border-top: 1px solid #374151;'] * len(row)
+        elif tipo == 'N2':
+            return ['background-color: #1a2332; color: #f3f4f6; font-weight: bold;'] * len(row)
+        elif tipo == 'N3':
+            return ['background-color: #0e131f; color: #d1d5db; font-weight: normal;'] * len(row)
+        elif tipo == 'N4':
+            return ['background-color: #080c14; color: #9ca3af; font-style: italic;'] * len(row)
+        return [''] * len(row)
+
+    cols_ind = [c for c in df_resultado.columns if 'IND' in c]
+    styler = df_resultado.style.apply(estilo_dark_escalonado, axis=1)
+    if cols_ind:
+        styler = styler.map(resaltar_variaciones, subset=cols_ind)
+
+    st.subheader(f"🏷️ Detalle Escalonado: {nombre_prov}")
+    st.dataframe(
+        styler,
+        use_container_width=True,
+        hide_index=True,
+        height=(len(df_resultado) + 1) * 35 + 5
+    )
+
 # ---------------------------------------------------------
-# 4. Generador de PDF Completo y Manual de Operaciones
+# 4. Generador de PDF Completo
 # ---------------------------------------------------------
 def construir_datos_tabla_mensual_pdf(df_filtrado):
     pivot_base = pd.pivot_table(
@@ -292,6 +524,77 @@ def construir_datos_tabla_mensual_pdf(df_filtrado):
         
     return data_pdf
 
+def construir_tabla_comparativa_pdf(df_sub: pd.DataFrame, col_group: str, titulo_col: str):
+    if df_sub.empty:
+        return None
+
+    pivot = pd.pivot_table(
+        df_sub,
+        index=col_group,
+        columns='ANIO',
+        values='VENTA_NETA',
+        aggfunc='sum',
+        fill_value=0
+    ).reset_index()
+
+    anios = sorted([col for col in pivot.columns if col != col_group])
+    if len(anios) == 0:
+        return None
+
+    headers = [titulo_col]
+    for anio in anios:
+        headers.append(str(anio))
+    if len(anios) >= 2:
+        headers.append(f"Var % ({str(anios[1])[-2:]}/{str(anios[0])[-2:]})")
+    if len(anios) >= 3:
+        headers.append(f"{anios[1]} ({anios[2]})")
+        headers.append(str(anios[2]))
+        headers.append(f"Var % ({str(anios[2])[-2:]}/{str(anios[1])[-2:]})")
+
+    filas = [headers]
+
+    for _, row in pivot.iterrows():
+        fila = [str(row[col_group])[:25]]
+        for anio in anios:
+            fila.append(f"₡{row[anio]:,.0f}")
+        
+        if len(anios) >= 2:
+            v_var1 = calcular_variacion(row[anios[1]], row[anios[0]])
+            fila.append(f"{v_var1:+.1f}%")
+        
+        if len(anios) >= 3:
+            a2, a3 = anios[1], anios[2]
+            meses_a3 = df_sub[df_sub['ANIO'] == a3]['MES_NUM'].unique()
+            v_a2_per = df_sub[(df_sub['ANIO'] == a2) & (df_sub['MES_NUM'].isin(meses_a3)) & (df_sub[col_group] == row[col_group])]['VENTA_NETA'].sum()
+            v_a3_per = df_sub[(df_sub['ANIO'] == a3) & (df_sub['MES_NUM'].isin(meses_a3)) & (df_sub[col_group] == row[col_group])]['VENTA_NETA'].sum()
+            
+            fila.append(f"₡{v_a2_per:,.0f}")
+            fila.append(f"₡{v_a3_per:,.0f}")
+            v_var2 = calcular_variacion(v_a3_per, v_a2_per)
+            fila.append(f"{v_var2:+.1f}%")
+
+        filas.append(fila)
+
+    fila_tot = ['TOTAL']
+    for anio in anios:
+        fila_tot.append(f"₡{pivot[anio].sum():,.0f}")
+
+    if len(anios) >= 2:
+        tot_var1 = calcular_variacion(pivot[anios[1]].sum(), pivot[anios[0]].sum())
+        fila_tot.append(f"{tot_var1:+.1f}%")
+
+    if len(anios) >= 3:
+        a2, a3 = anios[1], anios[2]
+        meses_a3 = df_sub[df_sub['ANIO'] == a3]['MES_NUM'].unique()
+        v2_tot = df_sub[(df_sub['ANIO'] == a2) & (df_sub['MES_NUM'].isin(meses_a3))]['VENTA_NETA'].sum()
+        v3_tot = df_sub[(df_sub['ANIO'] == a3) & (df_sub['MES_NUM'].isin(meses_a3))]['VENTA_NETA'].sum()
+        fila_tot.append(f"₡{v2_tot:,.0f}")
+        fila_tot.append(f"₡{v3_tot:,.0f}")
+        fila_tot.append(f"{calcular_variacion(v3_tot, v2_tot):+.1f}%")
+
+    filas.append(fila_tot)
+    return filas
+
 def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
     if not REPORTLAB_DISPONIBLE:
         return None
@@ -300,7 +603,7 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
     doc = SimpleDocTemplate(
         buffer, 
         pagesize=A4,
-        rightMargin=15, leftMargin=15, topMargin=20, bottomMargin=20
+        rightMargin=12, leftMargin=12, topMargin=15, bottomMargin=15
     )
     
     story = []
@@ -309,17 +612,17 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
     style_title = ParagraphStyle(
         'TitleStyle',
         parent=styles['Heading1'],
-        fontSize=13,
-        textColor=colors.HexColor("#2f5597"),
-        spaceAfter=4
+        fontSize=12,
+        textColor=colors.HexColor("#00174F"),
+        spaceAfter=3
     )
     style_subtitle = ParagraphStyle(
         'SubTitleStyle',
         parent=styles['Heading2'],
-        fontSize=10,
-        textColor=colors.HexColor("#333333"),
-        spaceAfter=4,
-        spaceBefore=6,
+        fontSize=9,
+        textColor=colors.HexColor("#009640"),
+        spaceAfter=3,
+        spaceBefore=5,
         keepWithNext=True
     )
 
@@ -328,66 +631,89 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly):
     
     clientes_unicos = df_analisis['CLIENTE'].unique()
     if len(clientes_unicos) == 1:
-        story.append(Spacer(1, 4))
+        story.append(Spacer(1, 2))
         story.append(Paragraph(f"<b>Cliente:</b> {df_analisis['ALIAS'].iloc[0]} | <b>Razón Social:</b> {df_analisis['NOMBRE'].iloc[0]} | <b>Código:</b> {df_analisis['CLIENTE'].iloc[0]}", styles['Normal']))
 
     vendedores_unicos = df_analisis['VENDEDOR'].unique()
     if len(vendedores_unicos) == 1 and pd.notna(vendedores_unicos[0]):
         story.append(Paragraph(f"<b>Vendedor:</b> {vendedores_unicos[0]}", styles['Normal']))
 
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 6))
 
-    marca_rest = st.session_state.get("marca_restringida")
-    if marca_rest:
-        proveedores_principales = [marca_rest]
-    else:
-        proveedores_principales = ['COLGATE_PALM', 'ESSITY', 'HEINZ.CR', 'ALIMER S.A.', 'PEPSICO']
-
-    titulo_gen = Paragraph("<b>Tabla Comparativa por Mes y Variaciones (2024 - 2025 - 2026) - Consolidado General</b>", style_subtitle)
-    data_gen = construir_datos_tabla_mensual_pdf(df_analisis)
-    t_gen = Table(data_gen, colWidths=[65, 75, 75, 75, 75, 75])
-    t_gen.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#4a90e2")),
+    style_table_gen = TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#00174F")),
         ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('ALIGN', (0,1), (0,-1), 'LEFT'),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0,0), (-1,0), 6.5),
+        ('FONTSIZE', (0,0), (-1,0), 6),
         ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#e2efda")),
         ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
         ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-        ('FONTSIZE', (0,1), (-1,-1), 6.5),
-    ]))
+        ('FONTSIZE', (0,1), (-1,-1), 5.5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+        ('TOPPADDING', (0,0), (-1,-1), 2),
+    ])
+
+    # 1. Evolución Mensual
+    titulo_gen = Paragraph(f"<b>1. Evolución Mensual y Variaciones Interanuales - {seleccion_actual}</b>", style_subtitle)
+    data_gen = construir_datos_tabla_mensual_pdf(df_analisis)
+    t_gen = Table(data_gen, colWidths=[60, 70, 70, 65, 70, 65])
+    t_gen.setStyle(style_table_gen)
     story.append(KeepTogether([titulo_gen, t_gen]))
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 6))
 
-    for prov_esp in proveedores_principales:
-        df_prov_esp = df_analisis[df_analisis['CLASIFICACION_1'].str.strip() == prov_esp]
-        if not df_prov_esp.empty:
-            titulo_esp = Paragraph(f"<b>Tabla Comparativa por Mes y Variaciones (2024 - 2025 - 2026) - Proveedor: {prov_esp}</b>", style_subtitle)
-            data_esp = construir_datos_tabla_mensual_pdf(df_prov_esp)
-            t_esp = Table(data_esp, colWidths=[65, 75, 75, 75, 75, 75])
-            t_esp.setStyle(TableStyle([
-                ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#5b9bd5")),
-                ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
-                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0,0), (-1,0), 6.5),
-                ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#f2f2f2")),
-                ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
-                ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-                ('FONTSIZE', (0,1), (-1,-1), 6.5),
-            ]))
-            story.append(KeepTogether([titulo_esp, t_esp]))
-            story.append(Spacer(1, 8))
-
+    # 2. Gráfica
     try:
-        img_bytes = fig_plotly.to_image(format="png", width=650, height=240, scale=2)
+        img_bytes = fig_plotly.to_image(format="png", width=650, height=220, scale=2)
         img_io = io.BytesIO(img_bytes)
-        titulo_img = Paragraph("<b>Tendencia Evolutiva Mensual</b>", style_subtitle)
-        story.append(KeepTogether([titulo_img, RLImage(img_io, width=420, height=155)]))
-        story.append(Spacer(1, 8))
+        titulo_img = Paragraph("<b>2. Tendencia Gráfica Evolutiva</b>", style_subtitle)
+        story.append(KeepTogether([titulo_img, RLImage(img_io, width=420, height=140)]))
+        story.append(Spacer(1, 6))
     except Exception:
         pass
+
+    # 3. Comparativa por Proveedores
+    marca_rest = st.session_state.get("marca_restringida")
+    if not marca_rest and seleccion_actual == "📊 Consolidado General (Sedisur)":
+        data_c1 = construir_tabla_comparativa_pdf(df_analisis, 'CLASIFICACION_1', 'Proveedor')
+        if data_c1:
+            num_cols = len(data_c1[0])
+            col_widths = [110] + [50] * (num_cols - 1)
+            titulo_c1 = Paragraph("<b>3. Comparativa por Proveedores (Consolidado Sedisur)</b>", style_subtitle)
+            t_c1 = Table(data_c1, colWidths=col_widths)
+            t_c1.setStyle(style_table_gen)
+            story.append(KeepTogether([titulo_c1, t_c1]))
+            story.append(Spacer(1, 6))
+
+    # 4. Detalle por Submarcas / Clasificaciones
+    proveedores_en_df = df_analisis['CLASIFICACION_1'].dropna().unique()
+    proveedores_a_procesar = [marca_rest] if marca_rest else list(proveedores_en_df)
+
+    story.append(Paragraph("<b>4. Detalle por Clasificación / Sub-Marcas</b>", style_subtitle))
+    for prov in proveedores_a_procesar:
+        df_sub_prov = df_analisis[df_analisis['CLASIFICACION_1'].str.strip() == prov.strip()]
+        if not df_sub_prov.empty:
+            if prov.strip() == 'HEINZ.CR':
+                col_detalle = 'HEINZ_CATEGORIA'
+            elif prov.strip() == 'RECKITT':
+                col_detalle = 'RECKITT_SEGMENTO'
+            elif prov.strip() in ['ALIMER S.A.', 'BARRAZA']:
+                col_detalle = 'CLASIFICACION_3'
+            else:
+                col_detalle = 'CLASIFICACION_2'
+
+            data_sub = construir_tabla_comparativa_pdf(df_sub_prov, col_detalle, f'Clasificación: {prov}')
+            if data_sub and len(data_sub) > 2:
+                num_cols = len(data_sub[0])
+                col_widths = [110] + [50] * (num_cols - 1)
+                t_sub = Table(data_sub, colWidths=col_widths)
+                t_sub.setStyle(style_table_gen)
+                story.append(KeepTogether([
+                    Paragraph(f"<b>Detalle Subclasificaciones: {prov}</b>", ParagraphStyle('ProvHead', parent=styles['Normal'], fontSize=8, textColor=colors.HexColor("#333333"), spaceBefore=3, spaceAfter=2)),
+                    t_sub,
+                    Spacer(1, 4)
+                ]))
 
     doc.build(story)
     buffer.seek(0)
@@ -400,12 +726,15 @@ def generar_pdf_manual_operaciones():
     except FileNotFoundError:
         return None
 
+# ---------------------------------------------------------
+# 5. Vista Comparativa
+# ---------------------------------------------------------
 def mostrar_vista_comparativa(df: pd.DataFrame, df_raw_completo: pd.DataFrame):
     st.header("📈 Comparativa de Ventas Año contra Año")
 
     if df.empty:
         st.warning("No hay datos disponibles con los filtros seleccionados.")
-        return
+        return None
 
     marca_restriccion = st.session_state.get("marca_restringida")
 
@@ -436,17 +765,17 @@ def mostrar_vista_comparativa(df: pd.DataFrame, df_raw_completo: pd.DataFrame):
         col_info, col_btn_izq, col_btn_sedisur, col_btn_der = st.columns([4, 1.2, 1.2, 1.2])
 
         with col_btn_izq:
-            if st.button("◀ Anterior", width='stretch'):
+            if st.button("◀ Anterior", use_container_width=True):
                 st.session_state["indice_vista_prov"] = (st.session_state["indice_vista_prov"] - 1) % len(lista_vistas)
                 st.rerun()
 
         with col_btn_sedisur:
-            if st.button("🏢 Sedisur", width='stretch'):
+            if st.button("🏢 Sedisur", use_container_width=True):
                 st.session_state["indice_vista_prov"] = 0
                 st.rerun()
 
         with col_btn_der:
-            if st.button("Siguiente ▶", width='stretch'):
+            if st.button("Siguiente ▶", use_container_width=True):
                 st.session_state["indice_vista_prov"] = (st.session_state["indice_vista_prov"] + 1) % len(lista_vistas)
                 st.rerun()
     else:
@@ -522,7 +851,7 @@ def mostrar_vista_comparativa(df: pd.DataFrame, df_raw_completo: pd.DataFrame):
     
     st.dataframe(
         styler, 
-        width='stretch', 
+        use_container_width=True, 
         hide_index=True,
         height=(len(df_resultado) + 1) * 35 + 3
     )
@@ -547,11 +876,19 @@ def mostrar_vista_comparativa(df: pd.DataFrame, df_raw_completo: pd.DataFrame):
 
     columna_y = 'VENTA_NETA' if tipo_grafico == "Venta Neta (₡)" else 'CANTIDAD_NETA'
 
+    # Paleta Corporativa Sedisur
+    colores_anios = {
+        '2024': '#8A9BA8',  # Gris base
+        '2025': '#00174F',  # Azul Sedisur
+        '2026': '#009640'   # Verde Sedisur
+    }
+
     fig = px.line(
         df_agrupado,
         x='MES_NOMBRE',
         y=columna_y,
         color='ANIO_STR',
+        color_discrete_map=colores_anios,
         markers=True,
         title=f"Evolución Mensual Comparativa ({seleccion_actual}): {tipo_grafico}",
         labels={
@@ -567,55 +904,55 @@ def mostrar_vista_comparativa(df: pd.DataFrame, df_raw_completo: pd.DataFrame):
     else:
         fig.update_traces(hovertemplate="<b>%{x}</b><br>Métrica: %{y:,.0f}<extra></extra>")
 
-    fig.update_layout(height=450, hovermode="x unified")
-    st.plotly_chart(fig, width='stretch')
+    fig.update_layout(
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font_color='#E0E0E0',
+        height=450, 
+        hovermode="x unified"
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
     pdf_buffer_global = None
     if REPORTLAB_DISPONIBLE:
         pdf_buffer_global = generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig)
 
     st.divider()
-    st.header("🏢 Comparativa por Proveedores y Sub-Marcas")
+    st.header("🏢 Comparativa por Proveedores y Sub-Marcas Escalonadas")
+
+    marcas_autorizadas_escalonadas = [
+        'COLGATE_PALM', 'ESSITY', 'PEPSICO', 'RECKITT',
+        'ALIMER S.A.', 'BARRAZA', 'HEINZ.CR'
+    ]
 
     if marca_restriccion:
-        df_base_proveedor = df_raw_completo[df_raw_completo['CLASIFICACION_1'].str.strip() == marca_restriccion]
-        generar_tabla_comparativa_formateada(df_base_proveedor, 'CLASIFICACION_1', f'Resumen ({marca_restriccion})')
-        st.markdown("---")
-        generar_tabla_comparativa_formateada(df_base_proveedor, 'CLASIFICACION_2', f"Clasificación de: {marca_restriccion}")
+        if marca_restriccion in marcas_autorizadas_escalonadas:
+            df_base_proveedor = df_raw_completo[df_raw_completo['CLASIFICACION_1'].str.strip() == marca_restriccion]
+            generar_tabla_escalonada_proveedor(df_base_proveedor, marca_restriccion)
     else:
-        generar_tabla_comparativa_formateada(df_analisis, 'CLASIFICACION_1', f'Resumen ({seleccion_actual})')
-        st.markdown("---")
+        if seleccion_actual == "📊 Consolidado General (Sedisur)":
+            generar_tabla_comparativa_formateada(df_analisis, 'CLASIFICACION_1', 'Resumen General Proveedores')
+            st.markdown("---")
 
-        proveedores_excluidos = [
-            'AB-INBEV', 'BAYER', 'BEL PREMIUM', 'CODOMI',  
-            'FARMANOVA', 'GRUPO Q.', 'HEALTH. RB.', 'HEALTH',  
-            'REYA CR.', 'RECKITT'
-        ]
-
-        orden_personalizado = [
-            'COLGATE_PALM', 'ESSITY', 'PEPSICO', 'HEINZ.CR', 'ALIMER S.A.',
-            'BAYER', 'RECKITT', 'BARRAZA', 'REYA CR.', 'HEALTH. RB.',
-            'GRUPO Q.', 'BEL PREMIUM', 'CODOMI', 'FARMANOVA', 'MUNDOREP', 'PRONUTRE'
-        ]
-
-        proveedores_disponibles_sub = df_analisis['CLASIFICACION_1'].dropna().unique()
-        proveedores_a_mostrar = [p for p in orden_personalizado if p in proveedores_disponibles_sub]
-        otros_proveedores_sub = sorted([p for p in proveedores_disponibles_sub if p not in orden_personalizado])
-        proveedores_finales_sub = proveedores_a_mostrar + otros_proveedores_sub
-
-        for prov in proveedores_finales_sub:
-            prov_limpio = prov.strip()
-            if prov_limpio not in proveedores_excluidos:
-                df_prov = df_analisis[df_analisis['CLASIFICACION_1'].str.strip() == prov_limpio]
-                if not df_prov.empty:
-                    generar_tabla_comparativa_formateada(df_prov, 'CLASIFICACION_2', f"Proveedor: {prov}")
+            proveedores_disponibles = sorted(df_analisis['CLASIFICACION_1'].dropna().unique())
+            for prov in proveedores_disponibles:
+                prov_limpio = prov.strip()
+                if prov_limpio in marcas_autorizadas_escalonadas:
+                    df_prov = df_analisis[df_analisis['CLASIFICACION_1'].str.strip() == prov_limpio]
+                    if not df_prov.empty:
+                        generar_tabla_escalonada_proveedor(df_prov, prov_limpio)
+                        st.markdown("<br>", unsafe_allow_html=True)
+        else:
+            proveedor_seleccionado = seleccion_actual.replace("Proveedor: ", "").strip()
+            if proveedor_seleccionado in marcas_autorizadas_escalonadas:
+                generar_tabla_escalonada_proveedor(df_analisis, proveedor_seleccionado)
 
     return pdf_buffer_global
 
 # ---------------------------------------------------------
-# 5. Vista Cobertura 8020
+# 6. Vista Cobertura 8020
 # ---------------------------------------------------------
-def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list, df_filtrado: pd.DataFrame):
+def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, reglas_b: dict, df_filtrado: pd.DataFrame):
     st.header("🎯 Análisis de Cobertura 80/20 y Oportunidades de Alcance")
 
     marca_restriccion = st.session_state.get("marca_restringida")
@@ -640,7 +977,7 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
         st.warning("No se encontraron registros para la referencia seleccionada en el Filtro A con los filtros actuales.")
         return
 
-    # A. Cálculo del Promedio Mensual
+    # A. Promedio Mensual
     df_mensual_cliente = df_ref_a.groupby(['CLIENTE', 'ALIAS', 'CATEGORIA_CLIENTE', 'ANIO', 'MES_NUM'], as_index=False).agg(
         VENTA_MES=('VENTA_NETA', 'sum')
     )
@@ -668,7 +1005,7 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
         df_clientes['PORCENTAJE_INDIVIDUAL'] = (df_clientes['VENTA_PROMEDIO_A'] / venta_total_promedio_acumulada) * 100
         df_clientes['PORCENTAJE_ACUMULADO'] = df_clientes['PORCENTAJE_INDIVIDUAL'].cumsum()
 
-    # B. Cálculo de la Venta del Mes Actual en base al FILTRO A
+    # B. Venta del Mes Actual
     ahora = datetime.now()
     mes_actual_num = ahora.month
     anio_actual_valor = ahora.year
@@ -693,7 +1030,7 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
     df_clientes = df_clientes.merge(df_venta_mes_actual, on='CLIENTE', how='left')
     df_clientes['VENTA_MES_ACTUAL'] = df_clientes['VENTA_MES_ACTUAL'].fillna(0)
 
-    # Construcción de la tabla final
+    # Tabla Base
     df_tabla_final = pd.DataFrame()
     df_tabla_final['Posición'] = df_clientes['Posición']
     df_tabla_final['CLIENTE'] = df_clientes['CLIENTE']
@@ -706,29 +1043,45 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
     df_tabla_final['% Acumulado'] = df_clientes['PORCENTAJE_ACUMULADO']
     df_tabla_final['Cobertura Filtro A'] = "✅"
 
-    if filtros_b and not marca_restriccion:
-        for prov_b in filtros_b:
-            df_ref_b = df_filtrado[df_filtrado['CLASIFICACION_1'] == prov_b]
-            if not df_ref_b.empty:
-                df_clientes_b = df_ref_b.groupby('CLIENTE', as_index=False).agg(
-                    VENTA_TOTAL_B=('VENTA_NETA', 'sum')
-                )
-            else:
-                df_clientes_b = pd.DataFrame(columns=['CLIENTE', 'VENTA_TOTAL_B'])
+    # C. Procesamiento del Filtro B
+    filtros_b_prov = reglas_b.get("proveedores", [])
+    sel_c2 = reglas_b.get("c2", [])
+    sel_c3 = reglas_b.get("c3", [])
+    sel_c4 = reglas_b.get("c4", [])
 
-            df_tabla_final = df_tabla_final.merge(df_clientes_b, on='CLIENTE', how='left')
-            df_tabla_final['VENTA_TOTAL_B'] = df_tabla_final['VENTA_TOTAL_B'].fillna(0)
-            
-            nombre_col_colocacion = f"Colocación: {prov_b}"
-            df_tabla_final[nombre_col_colocacion] = df_tabla_final['VENTA_TOTAL_B'].apply(lambda x: "✅" if x > 0 else "❌")
-            df_tabla_final = df_tabla_final.drop(columns=['VENTA_TOTAL_B'])
+    if filtros_b_prov and not marca_restriccion:
+        for prov_b in filtros_b_prov:
+            df_prov_b = df_raw[df_raw['CLASIFICACION_1'] == prov_b]
+
+            df_clientes_prov_b = df_prov_b.groupby('CLIENTE', as_index=False).agg(VENTA_CONSOLIDADA=('VENTA_NETA', 'sum'))
+            df_tabla_final = df_tabla_final.merge(df_clientes_prov_b, on='CLIENTE', how='left')
+            df_tabla_final['VENTA_CONSOLIDADA'] = df_tabla_final['VENTA_CONSOLIDADA'].fillna(0)
+            df_tabla_final[f"Colocación: {prov_b} (Consol.)"] = df_tabla_final['VENTA_CONSOLIDADA'].apply(lambda x: "✅" if x > 0 else "❌")
+            df_tabla_final = df_tabla_final.drop(columns=['VENTA_CONSOLIDADA'])
+
+            subcats_prov = [c for c in sel_c2 if c in df_prov_b['CLASIFICACION_2'].unique()]
+            if subcats_prov:
+                for subcat in subcats_prov:
+                    df_sub = df_prov_b[df_prov_b['CLASIFICACION_2'] == subcat]
+                    
+                    if sel_c3 and 'CLASIFICACION_3' in df_sub.columns:
+                        df_sub = df_sub[df_sub['CLASIFICACION_3'].isin(sel_c3)]
+                    if sel_c4 and 'CLASIFICACION_4' in df_sub.columns:
+                        df_sub = df_sub[df_sub['CLASIFICACION_4'].isin(sel_c4)]
+
+                    df_clientes_sub = df_sub.groupby('CLIENTE', as_index=False).agg(VENTA_SUBCAT=('VENTA_NETA', 'sum'))
+                    col_nombre = f"Colocación: {prov_b} - {subcat}"
+                    df_tabla_final = df_tabla_final.merge(df_clientes_sub, on='CLIENTE', how='left')
+                    df_tabla_final['VENTA_SUBCAT'] = df_tabla_final['VENTA_SUBCAT'].fillna(0)
+                    df_tabla_final[col_nombre] = df_tabla_final['VENTA_SUBCAT'].apply(lambda x: "✅" if x > 0 else "❌")
+                    df_tabla_final = df_tabla_final.drop(columns=['VENTA_SUBCAT'])
 
     def resaltar_8020(row):
         styles = [''] * len(row)
         try:
             idx_porc = row.index.get_loc('% Individual')
             if df_clientes.loc[row.name, 'PORCENTAJE_ACUMULADO'] <= 80.0:
-                styles[idx_porc] = 'color: #2e7d32; font-weight: bold;'
+                styles[idx_porc] = 'color: #00c853; font-weight: bold;'
         except Exception:
             pass
         return styles
@@ -736,12 +1089,12 @@ def mostrar_vista_cobertura_8020(df_raw: pd.DataFrame, filtro_a, filtros_b: list
     df_mostrar = df_tabla_final.drop(columns=['CLIENTE', '% Acumulado'])
     styler_8020 = df_mostrar.style.apply(resaltar_8020, axis=1)
 
-    titulo_b_str = f" vs ({', '.join(filtros_b)})" if (filtros_b and not marca_restriccion) else ""
+    titulo_b_str = f" vs ({', '.join(filtros_b_prov)})" if (filtros_b_prov and not marca_restriccion) else ""
     st.subheader(f"📊 Matriz de Cobertura para: {filtro_a}{titulo_b_str}")
-    st.dataframe(styler_8020, width='stretch', hide_index=True)
+    st.dataframe(styler_8020, use_container_width=True, hide_index=True)
 
 # ---------------------------------------------------------
-# 6. Flujo Principal de Ejecución
+# 7. Flujo Principal de Ejecución
 # ---------------------------------------------------------
 if verificar_acceso():
     with st.spinner("Cargando datos del reporte..."):
@@ -767,7 +1120,7 @@ if verificar_acceso():
 
     with st.sidebar:
         try:
-            st.image("Sedisur_logo.png", width='stretch')
+            st.image("Sedisur_logo.png", use_container_width=True)
         except Exception:
             st.markdown("### **Sedisur S.A.**")
 
@@ -780,23 +1133,23 @@ if verificar_acceso():
 
         st.markdown("---")
         
-        if st.button("🔄 Recargar Datos", width='stretch', help="Limpia la caché y recarga los datos"):
+        if st.button("🔄 Recargar Datos", use_container_width=True, help="Limpia la caché y recarga los datos"):
             cargar_datos_exactus.clear()
             cargar_datos_canales.clear()
             st.toast("¡Datos recargados correctamente!", icon="✅")
             st.rerun()
 
-        if st.button("Cerrar Sesión", width='stretch'):
+        if st.button("Cerrar Sesión", use_container_width=True):
             st.session_state["autenticado"] = False
             st.rerun()
         st.divider()
 
         st.markdown("### 🧭 Menú Principal")
-        if st.button("📈 Comparativa de ventas", width='stretch'):
+        if st.button("📈 Comparativa de ventas", use_container_width=True):
             st.session_state["vista_activa"] = "comparativa"
             st.rerun()
 
-        if st.button("🎯 Cobertura 8020", width='stretch'):
+        if st.button("🎯 Cobertura 8020", use_container_width=True):
             st.session_state["vista_activa"] = "cobertura"
             st.rerun()
 
@@ -809,7 +1162,7 @@ if verificar_acceso():
                 data=pdf_manual_bytes,
                 file_name="Manual_Operaciones_Sedisur.pdf",
                 mime="application/pdf",
-                width='stretch',
+                use_container_width=True,
                 help="Descargar tu manual de operaciones en PDF"
             )
         else:
@@ -831,8 +1184,6 @@ if verificar_acceso():
 
     if st.session_state["vista_activa"] == "comparativa":
         with st.expander("🔍 **Panel de Filtros Comerciales (Comparativa)**", expanded=True):
-            col_btn_desc, col_space = st.columns([1.2, 5.8])
-
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
@@ -886,8 +1237,17 @@ if verificar_acceso():
         df_filt = df_raw_global.copy()
         if sel_anios:
             df_filt = df_filt[df_filt['ANIO'].isin(sel_anios)]
+
+        # Lógica de Meses Cerrados por Defecto (Enero a Mes Anterior al Actual)
+        ahora_actual = datetime.now()
+        mes_actual_sistema = ahora_actual.month
+
         if sel_meses:
             df_filt = df_filt[df_filt['MES_NOMBRE'].isin(sel_meses)]
+        else:
+            limite_mes = max(1, mes_actual_sistema - 1)
+            df_filt = df_filt[df_filt['MES_NUM'] <= limite_mes]
+
         if sel_proveedores and not marca_restriccion:
             df_filt = df_filt[df_filt['CLASIFICACION_1'].isin(sel_proveedores)]
         if sel_clasificaciones:
@@ -905,19 +1265,19 @@ if verificar_acceso():
 
         pdf_buffer_generado = mostrar_vista_comparativa(df_filt, df_raw_completo)
 
-        with col_btn_desc:
-            if REPORTLAB_DISPONIBLE and pdf_buffer_generado:
-                st.download_button(
-                    label="📥 Descargar PDF",
-                    data=pdf_buffer_generado,
-                    file_name="Informe_Sedisur_Ejecutivo.pdf",
-                    mime="application/pdf",
-                    width='stretch',
-                    help="Descargar informe PDF completo con tablas y gráficos"
-                )
+        # Botón de Descarga del PDF
+        if REPORTLAB_DISPONIBLE and pdf_buffer_generado:
+            st.download_button(
+                label="📥 Descargar Informe Ejecutivo en PDF",
+                data=pdf_buffer_generado,
+                file_name="Informe_Sedisur_Ejecutivo.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                help="Descargar informe PDF completo con tablas y gráficos"
+            )
 
     elif st.session_state["vista_activa"] == "cobertura":
-        # --- PANEL 1: Filtros Generales de Contexto ---
+        # --- PANEL 1: Filtros Generales ---
         with st.expander("🔍 **Panel 1: Filtros Generales (Año, Mes, Vendedor y Categoría Cliente)**", expanded=True):
             col_g1, col_g2, col_g3, col_g4 = st.columns(4)
             
@@ -938,7 +1298,7 @@ if verificar_acceso():
                 categorias = sorted(df_raw['CATEGORIA_CLIENTE'].dropna().unique())
                 sel_cats_cob = st.multiselect("Categoría Cliente", categorias, key="filtro_cats_cob")
 
-        # --- PANEL 2: Filtros Comerciales (Filtro A y Filtro B Escalonados) ---
+        # --- PANEL 2: Filtros Comerciales (A y B) ---
         with st.expander("🔍 **Panel 2: Filtros Comerciales (Filtro A y Filtro B Escalonados)**", expanded=False):
             marcas_disponibles = sorted(df_raw['CLASIFICACION_1'].dropna().unique())
             
@@ -949,7 +1309,6 @@ if verificar_acceso():
 
             col_a, col_b = st.columns(2)
 
-            # --- BLOQUE FILTRO A ---
             with col_a:
                 st.markdown("### 📌 Filtro A (Referencia 80/20)")
                 if marca_restriccion:
@@ -958,7 +1317,6 @@ if verificar_acceso():
                 else:
                     filtro_a = st.selectbox("Proveedor Principal (Clasif. 1)", options=opciones_filtro_a, key="filtro_a_cob")
 
-                # Cascada Filtro A
                 df_cascada_a = df_raw if (filtro_a == "TODOS (Consolidado Sedisur)" or not filtro_a) else df_raw[df_raw['CLASIFICACION_1'] == filtro_a]
                 
                 clasificaciones_a = sorted(df_cascada_a['CLASIFICACION_2'].dropna().unique())
@@ -978,7 +1336,6 @@ if verificar_acceso():
                 tipos_prod_a = sorted(df_cascada_a_c4['CLASIFICACION_4'].dropna().unique()) if 'CLASIFICACION_4' in df_cascada_a_c4.columns else []
                 sel_tipos_prod_a = st.multiselect("Tipo de producto (Clasif. 4) - A", tipos_prod_a, key="filtro_tipos_prod_a")
 
-            # --- BLOQUE FILTRO B ---
             with col_b:
                 st.markdown("### 🔍 Filtro B (Comparativo de Colocación)")
                 if marca_restriccion:
@@ -1007,7 +1364,13 @@ if verificar_acceso():
                     tipos_prod_b = sorted(df_cascada_b_c4['CLASIFICACION_4'].dropna().unique()) if 'CLASIFICACION_4' in df_cascada_b_c4.columns else []
                     sel_tipos_prod_b = st.multiselect("Tipo de producto (Clasif. 4) - B", tipos_prod_b, key="filtro_tipos_prod_b")
 
-        # Aplicación de Filtros Generales y de Referencia (Filtro A)
+        reglas_b = {
+            "proveedores": filtros_b,
+            "c2": sel_clasificaciones_b,
+            "c3": sel_marcas_b,
+            "c4": sel_tipos_prod_b
+        }
+
         df_filt_cob = df_raw.copy()
         if sel_anios_cob:
             df_filt_cob = df_filt_cob[df_filt_cob['ANIO'].isin(sel_anios_cob)]
@@ -1018,7 +1381,6 @@ if verificar_acceso():
         if sel_cats_cob:
             df_filt_cob = df_filt_cob[df_filt_cob['CATEGORIA_CLIENTE'].isin(sel_cats_cob)]
 
-        # Filtros escalonados aplicados a la referencia A
         if sel_clasificaciones_a:
             df_filt_cob = df_filt_cob[df_filt_cob['CLASIFICACION_2'].isin(sel_clasificaciones_a)]
         if sel_marcas_a and 'CLASIFICACION_3' in df_filt_cob.columns:
@@ -1026,4 +1388,4 @@ if verificar_acceso():
         if sel_tipos_prod_a and 'CLASIFICACION_4' in df_filt_cob.columns:
             df_filt_cob = df_filt_cob[df_filt_cob['CLASIFICACION_4'].isin(sel_tipos_prod_a)]
 
-        mostrar_vista_cobertura_8020(df_raw, filtro_a, filtros_b, df_filt_cob)
+        mostrar_vista_cobertura_8020(df_raw, filtro_a, reglas_b, df_filt_cob)
