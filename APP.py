@@ -496,15 +496,15 @@ def generar_tabla_escalonada_proveedor(df_prov: pd.DataFrame, nombre_prov: str):
     )
 
 # ---------------------------------------------------------
-# 4. Generador de PDF Completo en Base a Vista Actual
+# 4. Generador de PDF Completo (Sin Símbolo de Moneda ₡)
 # ---------------------------------------------------------
-def formatear_dataframe_para_reportlab(df_tabla):
+def formatear_dataframe_para_reportlab_sin_moneda(df_tabla):
     if df_tabla is None or df_tabla.empty:
         return []
     headers = list(df_tabla.columns)
     filas = [headers]
     for _, row in df_tabla.iterrows():
-        fila_str = [str(val) for val in row.values]
+        fila_str = [str(val).replace('₡', '').strip() for val in row.values]
         filas.append(fila_str)
     return filas
 
@@ -566,7 +566,7 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly, df_m
     # 2. Tabla Comparativa por Mes y Variación Porcentual
     if df_mensual_resultado is not None and not df_mensual_resultado.empty:
         story.append(Paragraph("<b>1. Tabla Comparativa por Mes y Variación Porcentual</b>", style_section))
-        data_mensual = formatear_dataframe_para_reportlab(df_mensual_resultado)
+        data_mensual = formatear_dataframe_para_reportlab_sin_moneda(df_mensual_resultado)
         num_cols = len(data_mensual[0])
         col_w = [65] + [(500 - 65) / (num_cols - 1)] * (num_cols - 1)
         
@@ -577,7 +577,7 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly, df_m
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
             ('ALIGN', (0,1), (0,-1), 'LEFT'),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0,0), (-1,-1), 5.5),
+            ('FONTSIZE', (0,0), (-1,0), 5.5),
             ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#e2efda")),
             ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
             ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
@@ -600,11 +600,11 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly, df_m
     # 4. Sección: Comparativa por Proveedores y Sub-Marcas Escalonadas
     story.append(Paragraph("<b>3. Comparativa por Proveedores y Sub-Marcas Escalonadas</b>", style_section))
 
-    # Resumen General Proveedores (Solo si está en Consolidado General)
+    # Resumen General Proveedores (Solo en Consolidado General)
     if seleccion_actual == "📊 Consolidado General (Sedisur)":
         df_resumen_gen = obtener_datos_comparativa_formateada(df_analisis, 'CLASIFICACION_1', 'Resumen General Proveedores')
         if df_resumen_gen is not None and not df_resumen_gen.empty:
-            data_res = formatear_dataframe_para_reportlab(df_resumen_gen)
+            data_res = formatear_dataframe_para_reportlab_sin_moneda(df_resumen_gen)
             num_cols_res = len(data_res[0])
             col_w_res = [100] + [(500 - 100) / (num_cols_res - 1)] * (num_cols_res - 1)
             
@@ -615,7 +615,7 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly, df_m
                 ('ALIGN', (0,0), (-1,-1), 'CENTER'),
                 ('ALIGN', (0,1), (0,-1), 'LEFT'),
                 ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0,0), (-1,-1), 5.5),
+                ('FONTSIZE', (0,0), (-1,0), 5.5),
                 ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#e2efda")),
                 ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
                 ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
@@ -628,24 +628,23 @@ def generar_pdf_reporte_completo(df_analisis, seleccion_actual, fig_plotly, df_m
                 Spacer(1, 4)
             ]))
 
-    # Todos los Detalles Escalonados que se muestran en pantalla
+    # Todos los Detalles Escalonados activos en pantalla
     for prov_marca in marcas_a_mostrar:
         df_prov_filtrado = df_analisis[df_analisis['CLASIFICACION_1'].str.strip() == prov_marca.strip()]
         if not df_prov_filtrado.empty:
             df_esc, tipos_f = construir_datos_escalonados_proveedor(df_prov_filtrado, prov_marca)
             if df_esc is not None and not df_esc.empty:
-                data_esc = formatear_dataframe_para_reportlab(df_esc)
+                data_esc = formatear_dataframe_para_reportlab_sin_moneda(df_esc)
                 num_cols_esc = len(data_esc[0])
                 col_w_esc = [120] + [(500 - 120) / (num_cols_esc - 1)] * (num_cols_esc - 1)
                 
-                # Definir estilos por jerarquía de filas en el PDF
                 estilos_tabla_esc = [
                     ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#00174F")),
                     ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
                     ('ALIGN', (0,0), (-1,-1), 'CENTER'),
                     ('ALIGN', (0,1), (0,-1), 'LEFT'),
                     ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0,0), (-1,-1), 5.5),
+                    ('FONTSIZE', (0,0), (-1,0), 5.5),
                     ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cccccc")),
                     ('BOTTOMPADDING', (0,0), (-1,-1), 1.5),
                     ('TOPPADDING', (0,0), (-1,-1), 1.5),
@@ -904,7 +903,6 @@ def mostrar_vista_comparativa(df: pd.DataFrame, df_raw_completo: pd.DataFrame):
                 generar_tabla_escalonada_proveedor(df_analisis, proveedor_seleccionado)
                 marcas_renderizadas.append(proveedor_seleccionado)
 
-    # Generar PDF que incluye exactamente las tablas y gráficos renderizados en pantalla
     pdf_buffer_global = None
     if REPORTLAB_DISPONIBLE:
         pdf_buffer_global = generar_pdf_reporte_completo(
