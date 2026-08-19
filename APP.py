@@ -354,7 +354,6 @@ def generar_tabla_escalonada_proveedor(df_prov: pd.DataFrame, nombre_prov: str):
             df_c2 = df_prov[df_prov['CLASIFICACION_2'] == val_c2]
             procesar_agrupacion(df_c2, f"{val_c2}", 'N2')
             
-            # Si es CUIDADO BEBE, no desglosar clasificaciones 3 y 4
             val_c2_limpio = str(val_c2).upper().replace('_', ' ').strip()
             if val_c2_limpio == 'CUIDADO BEBE':
                 continue
@@ -386,7 +385,7 @@ def generar_tabla_escalonada_proveedor(df_prov: pd.DataFrame, nombre_prov: str):
                     df_c4 = df_c3[df_c3['CLASIFICACION_4'] == val_c4]
                     procesar_agrupacion(df_c4, f"            {val_c4}", 'N4')
 
-    # 3. CASO HEINZ.CR: Clasif 1 -> HEINZ_CATEGORIA -> Clasif 4 -> Clasif 3
+    # 3. CASO HEINZ.CR: Clasif 1 -> HEINZ_CATEGORIA -> Clasif 4 -> Clasif 3 (Excepto 'OTROS')
     elif nombre_prov == 'HEINZ.CR':
         orden_heinz = ['MAYONESA', 'KETCHUP', 'COLADOS', 'SALSITAS', 'OTROS']
         heinz_cats_presentes = [c for c in orden_heinz if c in df_prov['HEINZ_CATEGORIA'].dropna().unique()]
@@ -395,15 +394,19 @@ def generar_tabla_escalonada_proveedor(df_prov: pd.DataFrame, nombre_prov: str):
             df_cat = df_prov[df_prov['HEINZ_CATEGORIA'] == cat_heinz]
             procesar_agrupacion(df_cat, f"{cat_heinz}", 'N2')
             
+            # En la categoría OTROS no desglosar clasificaciones 4 y 3
+            if cat_heinz == 'OTROS':
+                continue
+            
             c4_unicos = sorted([x for x in df_cat['CLASIFICACION_4'].dropna().unique() if str(x).strip() != ''])
             for val_c4 in c4_unicos:
-                df_c4 = df_cat[df_cat['CLASIFICACION_4'] == val_c4]
-                procesar_agrupacion(df_c4, f"      {val_c4}", 'N3')
+                df_cat_c4 = df_cat[df_cat['CLASIFICACION_4'] == val_c4]
+                procesar_agrupacion(df_cat_c4, f"      {val_c4}", 'N3')
                 
-                c3_unicos = sorted([x for x in df_cat['CLASIFICACION_3'].dropna().unique() if str(x).strip() != ''])
+                c3_unicos = sorted([x for x in df_cat_c4['CLASIFICACION_3'].dropna().unique() if str(x).strip() != ''])
                 for val_c3 in c3_unicos:
-                    df_c3 = df_c4[df_c4['CLASIFICACION_3'] == val_c3]
-                    procesar_agrupacion(df_c3, f"            {val_c3}", 'N4')
+                    df_cat_c3 = df_cat_c4[df_cat_c4['CLASIFICACION_3'] == val_c3]
+                    procesar_agrupacion(df_cat_c3, f"            {val_c3}", 'N4')
 
     # 4. CASO RECKITT: Clasif 1 -> CORE / VASTACY -> Clasif 3
     elif nombre_prov == 'RECKITT':
