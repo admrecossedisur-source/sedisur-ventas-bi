@@ -29,7 +29,7 @@ USUARIOS_PERMITIDOS = {
     "adm": {"password": "Adm1994", "cargo": "Supervisión", "rol": "administrador"},
     
     # --- Agentes Proveedores ---
-    "eliecer_valdez@colpal.com": {"password": "Col123", "cargo": "Agente Proveedor", "rol": "proveedor_marca", "marca_restringida": "COLGATE_PALM"},
+    "oscar_vasquez@colpal.com": {"password": "Col123", "cargo": "Agente Proveedor", "rol": "proveedor_marca", "marca_restringida": "COLGATE_PALM"},
     "hugomora@alimer.com": {"password": "Ali123", "cargo": "Agente Proveedor", "rol": "proveedor_marca", "marca_restringida": "ALIMER S.A."},
     "jonathan.romero@sedisur.com": {"password": "Rec123", "cargo": "Agente Proveedor", "rol": "proveedor_marca", "marca_restringida": "RECKITT"},
     "alexander.castro@essity.com": {"password": "Ess123", "cargo": "Agente Proveedor", "rol": "proveedor_marca", "marca_restringida": "ESSITY"},
