@@ -4,3 +4,4 @@ plotly
 pyarrow
 reportlab
 openpyxl 
+kaleido
